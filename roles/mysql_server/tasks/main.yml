@@ -1,0 +1,32 @@
+---
+- name: Verifier que le systeme est Ubuntu 22.04
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version == "22.04"
+    fail_msg: "Ce role necessite Ubuntu 22.04."
+
+- name: Actualiser le cache APT si necessaire
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: "{{ mysql_server_cache_valid_time }}"
+
+- name: Installer MySQL Server a la version souhaitee
+  ansible.builtin.apt:
+    name: "{{ mysql_server_package }}={{ mysql_server_package_version }}"
+    state: present
+
+- name: Activer et demarrer le service MySQL
+  ansible.builtin.systemd:
+    name: "{{ mysql_server_service }}"
+    enabled: true
+    state: started
+
+- name: Verifier la version MySQL installee
+  ansible.builtin.command: mysql --version
+  register: mysql_version_result
+  changed_when: false
+
+- name: Afficher la version MySQL
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} : {{ mysql_version_result.stdout }}"

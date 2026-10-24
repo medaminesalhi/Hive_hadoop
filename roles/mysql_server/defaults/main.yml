@@ -1,0 +1,5 @@
+---
+mysql_server_package: mysql-server
+mysql_server_package_version: "8.0.46-0ubuntu0.22.04.4"
+mysql_server_service: mysql
+mysql_server_cache_valid_time: 3600

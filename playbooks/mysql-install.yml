@@ -1,0 +1,9 @@
+---
+- name: Installer MySQL Server sur le cluster
+  hosts: hadoop_cluster
+  become: true
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - mysql_server
