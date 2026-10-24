@@ -1,0 +1,37 @@
+---
+# Version officielle de ZooKeeper
+zookeeper_version: "3.8.7"
+
+# Archive officielle
+zookeeper_archive: "apache-zookeeper-{{ zookeeper_version }}-bin.tar.gz"
+
+zookeeper_download_url: "https://downloads.apache.org/zookeeper/zookeeper-{{ zookeeper_version }}/{{ zookeeper_archive }}"
+
+# Verification SHA-512 de l'archive officielle
+zookeeper_sha512: "9a83f2814221f7174614c7367c968c2d1c7f9ae5a48b9e4d45f7229f4bf0b19d312cc168f92a101b432f78183f4ca228e34d5722972a7511851a5d412c700718"
+
+# Emplacements
+zookeeper_install_dir: "/opt/apache-zookeeper-{{ zookeeper_version }}-bin"
+zookeeper_home: "/opt/zookeeper"
+zookeeper_config_dir: "/etc/zookeeper"
+zookeeper_data_dir: "/var/lib/zookeeper"
+zookeeper_log_dir: "/var/log/zookeeper"
+
+# Ports
+zookeeper_client_port: 2181
+zookeeper_peer_port: 2888
+zookeeper_election_port: 3888
+
+# Membres du cluster
+zookeeper_nodes:
+  - id: 1
+    name: master
+    ip: 192.168.56.10
+
+  - id: 2
+    name: worker1
+    ip: 192.168.56.11
+
+  - id: 3
+    name: worker2
+    ip: 192.168.56.12

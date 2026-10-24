@@ -1,0 +1,27 @@
+# Temps de base : 2 secondes
+tickTime=2000
+
+# Delai d'initialisation et de synchronisation
+initLimit=10
+syncLimit=5
+
+# Repertoire des donnees persistantes
+dataDir={{ zookeeper_data_dir }}
+
+# Port des clients
+clientPort={{ zookeeper_client_port }}
+
+# Nombre maximal de connexions par client
+maxClientCnxns=60
+
+# Purge automatique des anciens snapshots
+autopurge.snapRetainCount=3
+autopurge.purgeInterval=1
+
+# Desactiver l'interface d'administration HTTP
+admin.enableServer=false
+
+# Membres du quorum
+{% for node in zookeeper_nodes %}
+server.{{ node.id }}={{ node.ip }}:{{ zookeeper_peer_port }}:{{ zookeeper_election_port }}
+{% endfor %}

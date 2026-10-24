@@ -1,0 +1,11 @@
+---
+- name: Installer et configurer le cluster ZooKeeper
+  hosts: all
+  become: true
+  gather_facts: true
+
+  # Traiter les noeuds un par un
+  serial: 1
+
+  roles:
+    - zookeeper

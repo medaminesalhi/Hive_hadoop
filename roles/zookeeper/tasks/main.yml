@@ -1,0 +1,121 @@
+---
+- name: Verifier que le noeud appartient au cluster ZooKeeper
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in (zookeeper_nodes | map(attribute='name') | list)
+    fail_msg: "Ce noeud ne figure pas dans zookeeper_nodes."
+
+- name: Installer Java et les outils necessaires
+  ansible.builtin.apt:
+    name:
+      - openjdk-11-jre-headless
+      - ca-certificates
+      - tar
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Creer le groupe systeme ZooKeeper
+  ansible.builtin.group:
+    name: zookeeper
+    system: true
+    state: present
+
+- name: Creer le compte de service ZooKeeper
+  ansible.builtin.user:
+    name: zookeeper
+    group: zookeeper
+    system: true
+    home: "{{ zookeeper_data_dir }}"
+    shell: /usr/sbin/nologin
+    create_home: false
+    state: present
+
+- name: Telecharger l'archive officielle ZooKeeper
+  ansible.builtin.get_url:
+    url: "{{ zookeeper_download_url }}"
+    dest: "/tmp/{{ zookeeper_archive }}"
+    checksum: "sha512:{{ zookeeper_sha512 }}"
+    mode: "0644"
+
+- name: Extraire ZooKeeper dans /opt
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ zookeeper_archive }}"
+    dest: /opt
+    remote_src: true
+    creates: "{{ zookeeper_install_dir }}/bin/zkServer.sh"
+
+- name: Creer le lien symbolique ZooKeeper
+  ansible.builtin.file:
+    src: "{{ zookeeper_install_dir }}"
+    dest: "{{ zookeeper_home }}"
+    state: link
+    force: true
+
+- name: Creer les repertoires ZooKeeper
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ zookeeper_config_dir }}"
+      owner: root
+      group: zookeeper
+      mode: "0750"
+
+    - path: "{{ zookeeper_data_dir }}"
+      owner: zookeeper
+      group: zookeeper
+      mode: "0750"
+
+    - path: "{{ zookeeper_log_dir }}"
+      owner: zookeeper
+      group: zookeeper
+      mode: "0750"
+
+- name: Determiner l'identifiant du noeud courant
+  ansible.builtin.set_fact:
+    zookeeper_myid: >-
+      {{ zookeeper_nodes
+         | selectattr('name', 'equalto', inventory_hostname)
+         | map(attribute='id')
+         | first }}
+
+- name: Deployer la configuration ZooKeeper
+  ansible.builtin.template:
+    src: zoo.cfg.j2
+    dest: "{{ zookeeper_config_dir }}/zoo.cfg"
+    owner: root
+    group: zookeeper
+    mode: "0640"
+  notify: Restart ZooKeeper
+
+- name: Creer le fichier myid du noeud
+  ansible.builtin.copy:
+    content: "{{ zookeeper_myid }}\n"
+    dest: "{{ zookeeper_data_dir }}/myid"
+    owner: zookeeper
+    group: zookeeper
+    mode: "0640"
+  notify: Restart ZooKeeper
+
+- name: Deployer le service systemd ZooKeeper
+  ansible.builtin.template:
+    src: zookeeper.service.j2
+    dest: /etc/systemd/system/zookeeper.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart ZooKeeper
+
+- name: Recharger la configuration systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Activer et demarrer ZooKeeper
+  ansible.builtin.systemd:
+    name: zookeeper
+    enabled: true
+    state: started

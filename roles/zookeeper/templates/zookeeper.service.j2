@@ -1,0 +1,25 @@
+[Unit]
+Description=Apache ZooKeeper Coordination Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+User=zookeeper
+Group=zookeeper
+
+WorkingDirectory={{ zookeeper_home }}
+
+Environment="ZOO_LOG_DIR={{ zookeeper_log_dir }}"
+
+ExecStart={{ zookeeper_home }}/bin/zkServer.sh --config {{ zookeeper_config_dir }} start-foreground
+ExecStop={{ zookeeper_home }}/bin/zkServer.sh --config {{ zookeeper_config_dir }} stop
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
