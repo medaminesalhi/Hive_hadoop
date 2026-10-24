@@ -1,0 +1,16 @@
+---
+- name: Vérifier que ~/.ssh existe pour vagrant
+  ansible.builtin.file:
+    path: /home/vagrant/.ssh
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: "0700"
+
+- name: Vérifier authorized_keys
+  ansible.builtin.file:
+    path: /home/vagrant/.ssh/authorized_keys
+    state: touch
+    owner: vagrant
+    group: vagrant
+    mode: "0600"

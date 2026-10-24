@@ -1,0 +1,6 @@
+---
+- name: Démarrer YARN
+  ansible.builtin.shell: |
+    . /etc/profile.d/hadoop.sh
+    start-yarn.sh
+  become_user: vagrant

@@ -1,0 +1,17 @@
+---
+- name: Installer Java
+  ansible.builtin.apt:
+    name: "{{ java_package }}"
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Vérifier Java
+  ansible.builtin.command: java -version
+  register: java_version_check
+  changed_when: false
+
+- name: Afficher la version Java
+  ansible.builtin.debug:
+    var: java_version_check.stderr_lines

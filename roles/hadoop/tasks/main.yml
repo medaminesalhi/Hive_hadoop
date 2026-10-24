@@ -1,0 +1,137 @@
+---
+- name: Vérifier que namenode_host est défini
+  ansible.builtin.assert:
+    that:
+      - namenode_host is defined
+      - namenode_host | length > 0
+    fail_msg: "La variable namenode_host est obligatoire dans group_vars/all.yml."
+
+- name: Vérifier que le groupe workers existe
+  ansible.builtin.assert:
+    that:
+      - groups['workers'] is defined
+    fail_msg: "Le groupe workers doit être présent dans l'inventory Ansible."
+
+- name: Créer le dossier temporaire Hadoop
+  ansible.builtin.file:
+    path: /tmp/hadoop-dist
+    state: directory
+    mode: "0755"
+
+- name: Vérifier si l’archive locale Hadoop existe sur le master
+  ansible.builtin.stat:
+    path: "{{ hadoop_local_archive }}"
+  register: hadoop_local_archive_stat
+  when: inventory_hostname == namenode_host
+
+- name: Copier l’archive locale Hadoop vers le cache du master
+  ansible.builtin.copy:
+    src: "{{ hadoop_local_archive }}"
+    dest: "{{ hadoop_master_archive_path }}"
+    mode: "0644"
+    remote_src: true
+  when:
+    - inventory_hostname == namenode_host
+    - hadoop_local_archive_stat.stat.exists
+
+- name: Télécharger Hadoop sur le master seulement si archive locale absente
+  ansible.builtin.get_url:
+    url: "{{ hadoop_download_url }}"
+    dest: "{{ hadoop_master_archive_path }}"
+    mode: "0644"
+    timeout: 300
+    force: false
+  when:
+    - inventory_hostname == namenode_host
+    - not hadoop_local_archive_stat.stat.exists
+
+- name: Vérifier que l’archive Hadoop existe sur le master
+  ansible.builtin.stat:
+    path: "{{ hadoop_master_archive_path }}"
+  register: hadoop_archive_on_master
+  when: inventory_hostname == namenode_host
+
+- name: Échouer si l’archive Hadoop est absente sur le master
+  ansible.builtin.fail:
+    msg: "L’archive Hadoop est introuvable sur le master après copie/téléchargement."
+  when:
+    - inventory_hostname == namenode_host
+    - not hadoop_archive_on_master.stat.exists
+
+- name: Vérifier que l’archive Hadoop sur le master est valide
+  ansible.builtin.command: tar -tzf {{ hadoop_master_archive_path }}
+  register: hadoop_archive_test
+  changed_when: false
+  when: inventory_hostname == namenode_host
+
+- name: Échouer si l’archive Hadoop sur le master est corrompue
+  ansible.builtin.fail:
+    msg: "L’archive Hadoop sur le master est invalide ou incomplète."
+  when:
+    - inventory_hostname == namenode_host
+    - hadoop_archive_test.rc != 0
+
+- name: Copier l’archive Hadoop du master vers les workers
+  ansible.builtin.copy:
+    src: "{{ hadoop_master_archive_path }}"
+    dest: "/tmp/hadoop-dist/{{ hadoop_archive_name }}"
+    mode: "0644"
+  when: inventory_hostname in groups['workers']
+
+- name: Extraire Hadoop
+  ansible.builtin.unarchive:
+    src: "/tmp/hadoop-dist/{{ hadoop_archive_name }}"
+    dest: "{{ hadoop_install_dir }}"
+    remote_src: true
+    creates: "{{ hadoop_target_dir }}"
+
+- name: Créer le lien symbolique /opt/hadoop
+  ansible.builtin.file:
+    src: "{{ hadoop_target_dir }}"
+    dest: "{{ hadoop_home }}"
+    state: link
+    force: true
+
+- name: Créer le dossier NameNode
+  ansible.builtin.file:
+    path: "{{ hdfs_namenode_dir }}"
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: "0755"
+  when: inventory_hostname == namenode_host
+
+- name: Créer le dossier DataNode sur les workers
+  ansible.builtin.file:
+    path: "{{ hdfs_datanode_dir }}"
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: "0755"
+  when: inventory_hostname in groups['workers']
+
+- name: Vérifier la présence du binaire Hadoop
+  ansible.builtin.stat:
+    path: "{{ hadoop_home }}/bin/hadoop"
+  register: hadoop_binary
+
+- name: Échouer si Hadoop n'est pas installé correctement
+  ansible.builtin.fail:
+    msg: "Le binaire Hadoop est introuvable sur {{ inventory_hostname }}."
+  when: not hadoop_binary.stat.exists
+
+- name: Vérifier la version Hadoop
+  ansible.builtin.shell: |
+    export JAVA_HOME={{ java_home }}
+    export HADOOP_HOME={{ hadoop_home }}
+    export PATH=$PATH:{{ hadoop_home }}/bin:{{ hadoop_home }}/sbin
+    hadoop version
+  args:
+    executable: /bin/bash
+  become_user: vagrant
+  register: hadoop_version_check
+  changed_when: false
+
+- name: Afficher la version Hadoop
+  ansible.builtin.debug:
+    var: hadoop_version_check.stdout_lines

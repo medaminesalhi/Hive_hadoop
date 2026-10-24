@@ -1,0 +1,31 @@
+# Ansible
+*.retry
+*.log
+*.out
+*.pid
+*.swp
+*.swo
+__pycache__/
+*.py[cod]
+
+# Vagrant et machines virtuelles
+.vagrant/
+
+# Archives binaires conservées localement
+files/*.tar.gz
+files/*.tgz
+files/*.zip
+
+# Secrets et configuration locale
+.env
+.env.*
+!.env.example
+vault_password_file
+.vault_pass
+*.pem
+id_rsa
+id_ed25519
+
+# Fichiers temporaires
+.cache/
+tmp/

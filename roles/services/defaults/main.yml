@@ -1,0 +1,7 @@
+namenode_hosts: []
+datanode_hosts: []
+resourcemanager_hosts: []
+nodemanager_hosts: []
+
+hdfs_namenode_dir: /var/lib/hadoop/hdfs/namenode
+hdfs_datanode_dir: /var/lib/hadoop/hdfs/datanode

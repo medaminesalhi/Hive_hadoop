@@ -1,0 +1,62 @@
+---
+- name: "GRAFANA | Install dependencies"
+  become: true
+  ansible.builtin.apt:
+    name:
+      - adduser
+      - libfontconfig1
+      - musl
+      - ca-certificates
+      - wget
+      - curl
+    state: present
+    update_cache: true
+
+- name: "GRAFANA | Check if Grafana is already installed"
+  ansible.builtin.command: grafana-server -v
+  register: grafana_version_check
+  changed_when: false
+  failed_when: false
+
+- name: "GRAFANA | Download Grafana package with retries"
+  become: true
+  ansible.builtin.get_url:
+    url: "https://dl.grafana.com/oss/release/grafana_11.1.0_amd64.deb"
+    dest: "/tmp/grafana_11.1.0_amd64.deb"
+    mode: "0644"
+    timeout: 180
+    force: false
+  register: grafana_download
+  retries: 5
+  delay: 20
+  until: grafana_download is succeeded
+  when: grafana_version_check.rc != 0
+
+- name: "GRAFANA | Install Grafana package"
+  become: true
+  ansible.builtin.apt:
+    deb: "/tmp/grafana_11.1.0_amd64.deb"
+  when: grafana_version_check.rc != 0
+
+- name: "GRAFANA | Reload systemd"
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: "GRAFANA | Enable and start Grafana"
+  become: true
+  ansible.builtin.systemd:
+    name: grafana-server
+    enabled: true
+    state: started
+
+- name: "GRAFANA | Check Grafana service status"
+  become: true
+  ansible.builtin.command: systemctl is-active grafana-server
+  register: grafana_service_status
+  changed_when: false
+  failed_when: grafana_service_status.stdout.strip() != "active"
+
+- name: "GRAFANA | Show Grafana status"
+  ansible.builtin.debug:
+    msg: "Grafana service is {{ grafana_service_status.stdout }} on {{ inventory_hostname }}"

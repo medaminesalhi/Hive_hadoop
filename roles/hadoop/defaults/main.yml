@@ -1,0 +1,11 @@
+hadoop_version: 3.4.3
+hadoop_archive_name: "hadoop-{{ hadoop_version }}.tar.gz"
+hadoop_dir_name: "hadoop-{{ hadoop_version }}"
+hadoop_download_url: "https://downloads.apache.org/hadoop/common/{{ hadoop_dir_name }}/{{ hadoop_archive_name }}"
+
+hadoop_install_dir: /opt
+hadoop_target_dir: "{{ hadoop_install_dir }}/{{ hadoop_dir_name }}"
+hadoop_home: /opt/hadoop
+
+hdfs_namenode_dir: /var/lib/hadoop/hdfs/namenode
+hdfs_datanode_dir: /var/lib/hadoop/hdfs/datanode

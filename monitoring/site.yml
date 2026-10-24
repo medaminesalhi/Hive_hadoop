@@ -1,0 +1,32 @@
+- name: Install node exporter on cluster nodes
+  hosts: cluster_nodes
+  become: true
+  roles:
+    - node_exporter
+
+- name: Install JMX exporter on Java service nodes
+  hosts: jmx_nodes
+  become: true
+  roles:
+    - jmx_exporter
+
+- name: Install Prometheus on monitoring VM
+  hosts: monitoring
+  become: true
+  roles:
+    - prometheus
+
+- name: Install Grafana on monitoring VM
+  hosts: monitoring
+  become: true
+  roles:
+    - grafana
+
+- name: Install Alertmanager on monitoring VM
+  hosts: monitoring
+  become: true
+  tasks:
+    - name: Include alertmanager role
+      include_role:
+        name: alertmanager
+      when: stack.alertmanager | default(true)

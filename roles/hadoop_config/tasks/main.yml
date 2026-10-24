@@ -1,0 +1,40 @@
+---
+- name: Déployer core-site.xml
+  ansible.builtin.template:
+    src: core-site.xml.j2
+    dest: "{{ hadoop_home }}/etc/hadoop/core-site.xml"
+    owner: vagrant
+    group: vagrant
+    mode: "0644"
+
+- name: Déployer hdfs-site.xml
+  ansible.builtin.template:
+    src: hdfs-site.xml.j2
+    dest: "{{ hadoop_home }}/etc/hadoop/hdfs-site.xml"
+    owner: vagrant
+    group: vagrant
+    mode: "0644"
+
+- name: Déployer yarn-site.xml
+  ansible.builtin.template:
+    src: yarn-site.xml.j2
+    dest: "{{ hadoop_home }}/etc/hadoop/yarn-site.xml"
+    owner: vagrant
+    group: vagrant
+    mode: "0644"
+
+- name: Déployer mapred-site.xml
+  ansible.builtin.template:
+    src: mapred-site.xml.j2
+    dest: "{{ hadoop_home }}/etc/hadoop/mapred-site.xml"
+    owner: vagrant
+    group: vagrant
+    mode: "0644"
+
+- name: Déployer workers
+  ansible.builtin.template:
+    src: workers.j2
+    dest: "{{ hadoop_home }}/etc/hadoop/workers"
+    owner: vagrant
+    group: vagrant
+    mode: "0644"

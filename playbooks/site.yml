@@ -1,0 +1,43 @@
+---
+- name: Préparation système de toutes les VM
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - common
+
+- name: Installation Java sur toutes les VM
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - java
+
+- name: Déploiement conditionnel Hadoop
+  hosts: hadoop_cluster
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Installation Hadoop
+      include_role:
+        name: hadoop
+      when: platforms.hadoop | default(false)
+
+    - name: Configuration environnement Hadoop
+      include_role:
+        name: hadoop_env
+      when: platforms.hadoop | default(false)
+
+    - name: Configuration fichiers Hadoop
+      include_role:
+        name: hadoop_config
+      when: platforms.hadoop | default(false)
+
+    - name: Configuration finale du cluster Hadoop
+      include_role:
+        name: config_final
+      vars:
+        hadoop_master_group: masters
+        hadoop_workers_group: workers
+      when: platforms.hadoop | default(false)
+

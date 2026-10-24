@@ -1,0 +1,39 @@
+---
+# Utilisateur/groupe propriétaire de Hadoop
+hadoop_user: vagrant
+hadoop_group: vagrant
+
+# Chemins Hadoop
+hadoop_home: /opt/hadoop
+hadoop_logs_dir: "{{ hadoop_home }}/logs"
+
+# Répertoires HDFS
+hdfs_namenode_dir: /var/lib/hadoop/hdfs/namenode
+hdfs_datanode_dir: /var/lib/hadoop/hdfs/datanode
+
+# Groupes d'inventaire
+hadoop_master_group: masters
+hadoop_workers_group: workers
+
+# Hôte NameNode principal
+# Si vide, le premier hôte du groupe master sera utilisé
+namenode_host: ""
+
+# IP privée du master pour /etc/hosts
+# Si vide, le rôle essaiera de la déduire
+namenode_private_ip: ""
+
+# Gestion /etc/hosts
+manage_etc_hosts: true
+
+# Supprimer les entrées loopback 127.x.x.x qui contiennent les noms du cluster
+remove_loopback_cluster_hostnames: true
+
+# Ajouter aussi le nom court dans le bloc /etc/hosts
+add_short_hostnames: true
+
+# Actions finales
+# Important : false par défaut pour éviter un reformatage non voulu
+format_namenode: false
+start_hdfs: true
+start_yarn: true

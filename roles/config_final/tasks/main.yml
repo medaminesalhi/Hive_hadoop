@@ -1,0 +1,351 @@
+---
+- name: "CONFIG FINAL | Vérifier que le groupe master existe"
+  ansible.builtin.assert:
+    that:
+      - hadoop_master_group in groups
+      - (groups[hadoop_master_group] | length) > 0
+    fail_msg: "Le groupe master '{{ hadoop_master_group }}' est absent ou vide."
+
+- name: "CONFIG FINAL | Vérifier que le groupe workers existe"
+  ansible.builtin.assert:
+    that:
+      - hadoop_workers_group in groups
+      - (groups[hadoop_workers_group] | length) > 0
+    fail_msg: "Le groupe workers '{{ hadoop_workers_group }}' est absent ou vide."
+
+- name: "CONFIG FINAL | Définir l'hôte NameNode principal"
+  ansible.builtin.set_fact:
+    config_final_namenode_host: "{{ (namenode_host | default('') | trim) if ((namenode_host | default('') | trim | length) > 0) else groups[hadoop_master_group][0] }}"
+
+- name: "CONFIG FINAL | Définir le master Hadoop logique"
+  ansible.builtin.set_fact:
+    hadoop_master_inventory_name: "{{ groups[hadoop_master_group][0] }}"
+
+- name: "CONFIG FINAL | Construire la liste des noeuds Hadoop"
+  ansible.builtin.set_fact:
+    hadoop_all_nodes: "{{ (groups[hadoop_master_group] + groups[hadoop_workers_group]) | unique }}"
+
+- name: "CONFIG FINAL | Construire la liste des noms à nettoyer du loopback"
+  ansible.builtin.set_fact:
+    cluster_hostnames_to_clean: "{{ (hadoop_all_nodes + (hadoop_all_nodes | map('regex_replace', '\\..*$', '') | list)) | unique }}"
+
+# =========================================================
+# /etc/hosts
+# =========================================================
+
+- name: "CONFIG FINAL | Supprimer les lignes 127.x.x.x contenant un nom du cluster"
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^127\\.[0-9]+\\.[0-9]+\\.[0-9]+\\s+.*\\b{{ item }}\\b.*$"
+    state: absent
+    backup: true
+  loop: "{{ cluster_hostnames_to_clean }}"
+  when:
+    - manage_etc_hosts | bool
+    - remove_loopback_cluster_hostnames | bool
+
+- name: "CONFIG FINAL | Ajouter les bonnes entrées Hadoop dans /etc/hosts"
+  become: true
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED HADOOP HOSTS"
+    block: |
+      {% for host in hadoop_all_nodes %}
+      {% set short_name = host.split('.')[0] %}
+      {% if hostvars[host].private_ip is defined and (hostvars[host].private_ip | string | trim | length) > 0 %}
+      {% set host_ip = hostvars[host].private_ip %}
+      {% elif hostvars[host].ansible_host is defined and (hostvars[host].ansible_host | string | trim | length) > 0 %}
+      {% set host_ip = hostvars[host].ansible_host %}
+      {% else %}
+      {% set host_ip = host %}
+      {% endif %}
+      {% if add_short_hostnames | bool %}
+      {{ host_ip }} {{ host }} {{ short_name }}
+      {% else %}
+      {{ host_ip }} {{ host }}
+      {% endif %}
+      {% endfor %}
+  when: manage_etc_hosts | bool
+
+# =========================================================
+# SSH master -> all nodes
+# =========================================================
+
+- name: "CONFIG FINAL | Préparer ~/.ssh sur tous les nœuds"
+  ansible.builtin.file:
+    path: "/home/{{ hadoop_user }}/.ssh"
+    state: directory
+    owner: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    mode: "0700"
+  become: true
+
+- name: "CONFIG FINAL | S'assurer que authorized_keys existe sur tous les nœuds"
+  ansible.builtin.file:
+    path: "/home/{{ hadoop_user }}/.ssh/authorized_keys"
+    state: touch
+    owner: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    mode: "0600"
+  become: true
+
+- name: "CONFIG FINAL | Générer la clé SSH RSA du master si absente"
+  ansible.builtin.openssh_keypair:
+    path: "/home/{{ hadoop_user }}/.ssh/id_rsa"
+    type: rsa
+    size: 4096
+    owner: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    mode: "0600"
+  become: true
+  become_user: "{{ hadoop_user }}"
+  when: inventory_hostname == hadoop_master_inventory_name
+
+- name: "CONFIG FINAL | Lire la clé publique du master"
+  ansible.builtin.slurp:
+    src: "/home/{{ hadoop_user }}/.ssh/id_rsa.pub"
+  register: master_public_key_raw
+  when: inventory_hostname == hadoop_master_inventory_name
+
+- name: "CONFIG FINAL | Partager la clé publique du master"
+  ansible.builtin.set_fact:
+    shared_master_public_key: "{{ hostvars[hadoop_master_inventory_name].master_public_key_raw.content | b64decode | trim }}"
+
+- name: "CONFIG FINAL | Autoriser la clé du master sur tous les nœuds"
+  ansible.posix.authorized_key:
+    user: "{{ hadoop_user }}"
+    key: "{{ shared_master_public_key }}"
+    state: present
+
+- name: "CONFIG FINAL | Vérifier que la clé publique du master existe bien dans authorized_keys"
+  ansible.builtin.shell: |
+    grep -F "$(cat /home/{{ hadoop_user }}/.ssh/id_rsa.pub)" /home/{{ hadoop_user }}/.ssh/authorized_keys >/dev/null && echo KEY_OK || echo KEY_MISSING
+  args:
+    executable: /bin/bash
+  register: master_key_check
+  changed_when: false
+  when: inventory_hostname == hadoop_master_inventory_name
+
+- name: "CONFIG FINAL | Échouer si la clé du master n'est pas autorisée"
+  ansible.builtin.fail:
+    msg: "La clé publique RSA du master n'a pas été ajoutée correctement dans authorized_keys."
+  when:
+    - inventory_hostname == hadoop_master_inventory_name
+    - master_key_check.stdout != "KEY_OK"
+
+- name: "CONFIG FINAL | Tester SSH du master vers lui-même"
+  ansible.builtin.shell: |
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /home/{{ hadoop_user }}/.ssh/id_rsa {{ hadoop_user }}@{{ hadoop_master_inventory_name }} "whoami && hostname"
+  args:
+    executable: /bin/bash
+  become: true
+  become_user: "{{ hadoop_user }}"
+  changed_when: false
+  when: inventory_hostname == hadoop_master_inventory_name
+
+- name: "CONFIG FINAL | Tester SSH du master vers les workers"
+  ansible.builtin.shell: |
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /home/{{ hadoop_user }}/.ssh/id_rsa {{ hadoop_user }}@{{ item }} "whoami && hostname"
+  args:
+    executable: /bin/bash
+  loop: "{{ groups[hadoop_workers_group] }}"
+  become: true
+  become_user: "{{ hadoop_user }}"
+  changed_when: false
+  when: inventory_hostname == hadoop_master_inventory_name
+
+# =========================================================
+# Détection installation Hadoop
+# =========================================================
+
+- name: "CONFIG FINAL | Vérifier le chemin Hadoop sans suivre le lien"
+  become: true
+  ansible.builtin.stat:
+    path: "{{ hadoop_home }}"
+    follow: false
+  register: hadoop_home_lstat
+
+- name: "CONFIG FINAL | Vérifier le chemin Hadoop réel"
+  become: true
+  ansible.builtin.stat:
+    path: "{{ hadoop_home }}"
+    follow: true
+  register: hadoop_home_stat
+
+- name: "CONFIG FINAL | Vérifier que Hadoop existe"
+  ansible.builtin.assert:
+    that:
+      - hadoop_home_stat.stat.exists
+    fail_msg: "Le chemin Hadoop '{{ hadoop_home }}' n'existe pas."
+
+- name: "CONFIG FINAL | Définir le vrai dossier Hadoop"
+  ansible.builtin.set_fact:
+    hadoop_real_home: "{{ hadoop_home_stat.stat.path if (hadoop_home_lstat.stat.islnk | default(false)) else hadoop_home }}"
+
+# =========================================================
+# Permissions Hadoop
+# =========================================================
+
+- name: "CONFIG FINAL | Créer le dossier logs Hadoop"
+  become: true
+  ansible.builtin.file:
+    path: "{{ hadoop_logs_dir }}"
+    state: directory
+    owner: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    mode: "0755"
+
+- name: "CONFIG FINAL | Corriger owner/group de l'installation Hadoop réelle"
+  become: true
+  ansible.builtin.file:
+    path: "{{ hadoop_real_home }}"
+    state: directory
+    owner: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    recurse: true
+
+- name: "CONFIG FINAL | Corriger permissions de l'installation Hadoop réelle"
+  become: true
+  ansible.builtin.file:
+    path: "{{ hadoop_real_home }}"
+    state: directory
+    mode: "0755"
+    recurse: true
+
+- name: "CONFIG FINAL | Corriger owner/group du lien /opt/hadoop"
+  become: true
+  ansible.builtin.file:
+    path: "{{ hadoop_home }}"
+    state: link
+    owner: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    force: true
+  when: hadoop_home_lstat.stat.islnk | default(false)
+
+- name: "CONFIG FINAL | Corriger owner/group des répertoires HDFS"
+  become: true
+  ansible.builtin.file:
+    path: /var/lib/hadoop
+    state: directory
+    owner: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    mode: "0755"
+    recurse: true
+
+# =========================================================
+# Répertoires HDFS
+# =========================================================
+
+- name: "CONFIG FINAL | Créer le dossier NameNode"
+  become: true
+  ansible.builtin.file:
+    path: "{{ hdfs_namenode_dir }}"
+    state: directory
+    owner: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    mode: "0755"
+  when: inventory_hostname == config_final_namenode_host
+
+- name: "CONFIG FINAL | Créer le dossier DataNode"
+  become: true
+  ansible.builtin.file:
+    path: "{{ hdfs_datanode_dir }}"
+    state: directory
+    owner: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    mode: "0755"
+  when: inventory_hostname in groups[hadoop_workers_group]
+
+# =========================================================
+# Formatage NameNode
+# =========================================================
+
+- name: "CONFIG FINAL | Vérifier si current/VERSION existe déjà dans le NameNode"
+  ansible.builtin.stat:
+    path: "{{ hdfs_namenode_dir }}/current/VERSION"
+  register: namenode_version_stat
+  when: inventory_hostname == config_final_namenode_host
+
+- name: "CONFIG FINAL | Formater le NameNode si première création"
+  become: true
+  become_user: "{{ hadoop_user }}"
+  ansible.builtin.shell: "{{ hadoop_home }}/bin/hdfs namenode -format -force -nonInteractive"
+  args:
+    executable: /bin/bash
+  when:
+    - inventory_hostname == config_final_namenode_host
+    - not namenode_version_stat.stat.exists
+
+# =========================================================
+# Démarrage HDFS
+# =========================================================
+
+- name: "CONFIG FINAL | Démarrer NameNode"
+  become: true
+  become_user: "{{ hadoop_user }}"
+  ansible.builtin.shell: "{{ hadoop_home }}/bin/hdfs --daemon start namenode"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - start_hdfs | bool
+    - inventory_hostname == config_final_namenode_host
+
+- name: "CONFIG FINAL | Attendre que le NameNode réponde"
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: 9870
+    delay: 2
+    timeout: 45
+  when:
+    - start_hdfs | bool
+    - inventory_hostname == config_final_namenode_host
+
+- name: "CONFIG FINAL | Démarrer SecondaryNameNode"
+  become: true
+  become_user: "{{ hadoop_user }}"
+  ansible.builtin.shell: "{{ hadoop_home }}/bin/hdfs --daemon start secondarynamenode"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - start_hdfs | bool
+    - inventory_hostname == config_final_namenode_host
+
+- name: "CONFIG FINAL | Démarrer DataNode"
+  become: true
+  become_user: "{{ hadoop_user }}"
+  ansible.builtin.shell: "{{ hadoop_home }}/bin/hdfs --daemon start datanode"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - start_hdfs | bool
+    - inventory_hostname in groups[hadoop_workers_group]
+
+# =========================================================
+# Démarrage YARN
+# =========================================================
+
+- name: "CONFIG FINAL | Démarrer ResourceManager"
+  become: true
+  become_user: "{{ hadoop_user }}"
+  ansible.builtin.shell: "{{ hadoop_home }}/bin/yarn --daemon start resourcemanager"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - start_yarn | bool
+    - inventory_hostname == config_final_namenode_host
+
+- name: "CONFIG FINAL | Démarrer NodeManager"
+  become: true
+  become_user: "{{ hadoop_user }}"
+  ansible.builtin.shell: "{{ hadoop_home }}/bin/yarn --daemon start nodemanager"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - start_yarn | bool
+    - inventory_hostname in groups[hadoop_workers_group]

@@ -1,0 +1,16 @@
+---
+- name: Déployer hadoop-env.sh
+  ansible.builtin.template:
+    src: hadoop-env.sh.j2
+    dest: "{{ hadoop_home }}/etc/hadoop/hadoop-env.sh"
+    owner: vagrant
+    group: vagrant
+    mode: "0755"
+
+- name: Déployer le profil global Hadoop
+  ansible.builtin.template:
+    src: hadoop.sh.j2
+    dest: /etc/profile.d/hadoop.sh
+    owner: root
+    group: root
+    mode: "0755"

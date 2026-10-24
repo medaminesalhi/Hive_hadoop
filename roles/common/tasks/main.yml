@@ -1,0 +1,42 @@
+---
+- name: Mettre à jour le cache apt
+  ansible.builtin.apt:
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Installer les paquets système de base
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-pip
+      - openssh-client
+      - openssh-server
+      - rsync
+      - curl
+      - tar
+      - unzip
+      - net-tools
+      - procps
+      - sshpass
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: S'assurer que le service SSH est actif
+  ansible.builtin.service:
+    name: ssh
+    state: started
+    enabled: true
+
+- name: Créer ~/.ssh pour l'utilisateur vagrant
+  ansible.builtin.file:
+    path: /home/vagrant/.ssh
+    state: directory
+    owner: vagrant
+    group: vagrant
+    mode: "0700"
+
+- name: Vérifier python3
+  ansible.builtin.command: python3 --version
+  changed_when: false

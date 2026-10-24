@@ -1,0 +1,172 @@
+---
+- name: JMX | Set variables
+  set_fact:
+    hadoop_home: "{{ hadoop_home | default('/opt/hadoop-3.4.3') }}"
+    jmx_exporter_dir: "/opt/jmx_exporter"
+    jmx_exporter_jar: "/opt/jmx_exporter/jmx_prometheus_javaagent.jar"
+    jmx_exporter_config: "/opt/jmx_exporter/config.yml"
+    jmx_hdfs_port: 9404
+    jmx_yarn_port: 9405
+
+- name: JMX | Set Hadoop config paths
+  set_fact:
+    hadoop_env_path: "{{ hadoop_home }}/etc/hadoop/hadoop-env.sh"
+    yarn_env_path: "{{ hadoop_home }}/etc/hadoop/yarn-env.sh"
+
+- name: JMX | Detect Hadoop master node
+  set_fact:
+    is_hadoop_master: "{{ inventory_hostname == groups['jmx_nodes'][0] }}"
+
+- name: JMX | Create jmx exporter directory
+  file:
+    path: "{{ jmx_exporter_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: JMX | Download JMX Exporter agent
+  get_url:
+    url: "https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/1.0.1/jmx_prometheus_javaagent-1.0.1.jar"
+    dest: "{{ jmx_exporter_jar }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: JMX | Write JMX Exporter config
+  copy:
+    dest: "{{ jmx_exporter_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      lowercaseOutputName: true
+      lowercaseOutputLabelNames: true
+      rules:
+        - pattern: ".*"
+  become: true
+
+- name: JMX | Check hadoop-env.sh exists
+  stat:
+    path: "{{ hadoop_env_path }}"
+  register: hadoop_env_file
+
+- name: JMX | Check yarn-env.sh exists
+  stat:
+    path: "{{ yarn_env_path }}"
+  register: yarn_env_file
+
+- name: JMX | Fail if hadoop-env.sh is missing
+  fail:
+    msg: "hadoop-env.sh introuvable : {{ hadoop_env_path }}"
+  when: not hadoop_env_file.stat.exists
+
+- name: JMX | Fail if yarn-env.sh is missing
+  fail:
+    msg: "yarn-env.sh introuvable : {{ yarn_env_path }}"
+  when: not yarn_env_file.stat.exists
+
+- name: JMX | Remove old JMX javaagent lines from hadoop-env.sh
+  lineinfile:
+    path: "{{ hadoop_env_path }}"
+    regexp: ".*jmx_prometheus_javaagent.*"
+    state: absent
+  become: true
+
+- name: JMX | Remove old JMX javaagent lines from yarn-env.sh
+  lineinfile:
+    path: "{{ yarn_env_path }}"
+    regexp: ".*jmx_prometheus_javaagent.*"
+    state: absent
+  become: true
+
+- name: JMX | Inject JMX Exporter for HDFS NameNode on master
+  blockinfile:
+    path: "{{ hadoop_env_path }}"
+    marker: "# {mark} CLUSTEROPS JMX NAMENODE"
+    block: |
+      export HDFS_NAMENODE_OPTS="$HDFS_NAMENODE_OPTS -javaagent:{{ jmx_exporter_jar }}={{ jmx_hdfs_port }}:{{ jmx_exporter_config }}"
+  become: true
+  when: is_hadoop_master
+
+- name: JMX | Inject JMX Exporter for HDFS DataNode on workers
+  blockinfile:
+    path: "{{ hadoop_env_path }}"
+    marker: "# {mark} CLUSTEROPS JMX DATANODE"
+    block: |
+      export HDFS_DATANODE_OPTS="$HDFS_DATANODE_OPTS -javaagent:{{ jmx_exporter_jar }}={{ jmx_hdfs_port }}:{{ jmx_exporter_config }}"
+  become: true
+  when: not is_hadoop_master
+
+- name: JMX | Inject JMX Exporter for YARN ResourceManager on master
+  blockinfile:
+    path: "{{ yarn_env_path }}"
+    marker: "# {mark} CLUSTEROPS JMX RESOURCEMANAGER"
+    block: |
+      export YARN_RESOURCEMANAGER_OPTS="$YARN_RESOURCEMANAGER_OPTS -javaagent:{{ jmx_exporter_jar }}={{ jmx_yarn_port }}:{{ jmx_exporter_config }}"
+  become: true
+  when: is_hadoop_master
+
+- name: JMX | Inject JMX Exporter for YARN NodeManager on workers
+  blockinfile:
+    path: "{{ yarn_env_path }}"
+    marker: "# {mark} CLUSTEROPS JMX NODEMANAGER"
+    block: |
+      export YARN_NODEMANAGER_OPTS="$YARN_NODEMANAGER_OPTS -javaagent:{{ jmx_exporter_jar }}={{ jmx_yarn_port }}:{{ jmx_exporter_config }}"
+  become: true
+  when: not is_hadoop_master
+
+- name: JMX | Resolve Hadoop master host
+  set_fact:
+    hadoop_master_host: "{{ groups['jmx_nodes'][0] }}"
+  run_once: true
+
+- name: JMX | Restart HDFS and YARN from master as vagrant user
+  shell: |
+    set -e
+    {{ hadoop_home }}/sbin/stop-yarn.sh || true
+    {{ hadoop_home }}/sbin/stop-dfs.sh || true
+    sleep 5
+    {{ hadoop_home }}/sbin/start-dfs.sh
+    {{ hadoop_home }}/sbin/start-yarn.sh
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ hadoop_master_host }}"
+  become: false
+  run_once: true
+
+- name: JMX | Wait for HDFS JMX port
+  wait_for:
+    host: "127.0.0.1"
+    port: "{{ jmx_hdfs_port }}"
+    timeout: 90
+
+- name: JMX | Verify HDFS JMX metrics endpoint
+  uri:
+    url: "http://127.0.0.1:{{ jmx_hdfs_port }}/metrics"
+    method: GET
+    status_code: 200
+    return_content: false
+
+- name: JMX | Wait for YARN JMX port
+  wait_for:
+    host: "127.0.0.1"
+    port: "{{ jmx_yarn_port }}"
+    timeout: 90
+
+- name: JMX | Verify YARN JMX metrics endpoint
+  uri:
+    url: "http://127.0.0.1:{{ jmx_yarn_port }}/metrics"
+    method: GET
+    status_code: 200
+    return_content: false
+
+- name: JMX | Show final status
+  debug:
+    msg:
+      - "JMX Exporter actif sur {{ inventory_hostname }}"
+      - "Role detecte: {{ 'master' if is_hadoop_master else 'worker' }}"
+      - "HDFS endpoint: http://{{ private_ip | default(ansible_host) }}:{{ jmx_hdfs_port }}/metrics"
+      - "YARN endpoint: http://{{ private_ip | default(ansible_host) }}:{{ jmx_yarn_port }}/metrics"
