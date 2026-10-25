@@ -1,0 +1,40 @@
+
+---
+- name: Installer MySQL Router
+  ansible.builtin.apt:
+    name: "{{ mysql_router_package }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Verifier la version de MySQL Router
+  ansible.builtin.command:
+    argv:
+      - mysqlrouter
+      - --version
+  register: mysql_router_version
+  changed_when: false
+
+- name: Afficher la version installee
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} : {{ mysql_router_version.stdout }}"
+
+- name: Recuperer la liste des services systemd
+  ansible.builtin.service_facts:
+
+- name: Identifier les services MySQL Router disponibles
+  ansible.builtin.debug:
+    msg: >-
+      Services Router sur {{ inventory_hostname }} :
+      {{
+        ansible_facts.services.keys()
+        | select('search', 'mysql.*router')
+        | list
+      }}
+
+- name: Confirmer que Router est installe
+  ansible.builtin.debug:
+    msg: >-
+      MySQL Router est installe sur {{ inventory_hostname }}.
+      Aucun demarrage n'est demande avant la creation
+      et le bootstrap d'InnoDB Cluster.

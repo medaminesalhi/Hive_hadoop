@@ -1,0 +1,6 @@
+---
+mysql_apt_key_url: "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB7B3B788A8D3785C"
+mysql_apt_key_ascii: "/usr/share/keyrings/mysql-apt.asc"
+mysql_apt_keyring: "/usr/share/keyrings/mysql-apt.gpg"
+
+mysql_shell_package: "mysql-shell"

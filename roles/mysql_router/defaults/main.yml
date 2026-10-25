@@ -1,0 +1,3 @@
+---
+mysql_router_package: mysql-router
+mysql_router_service: mysqlrouter

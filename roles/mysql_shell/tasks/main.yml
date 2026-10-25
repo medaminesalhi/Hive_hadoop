@@ -1,0 +1,129 @@
+
+---
+- name: Installer les outils necessaires
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - gnupg
+    state: present
+    update_cache: false
+
+- name: Creer le repertoire des cles APT
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Telecharger la cle MySQL actualisee
+  ansible.builtin.get_url:
+    url: "{{ mysql_apt_key_url }}"
+    dest: "{{ mysql_apt_key_ascii }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: true
+
+- name: Lire le fingerprint de la cle
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --show-keys
+      - --with-colons
+      - --fingerprint
+      - "{{ mysql_apt_key_ascii }}"
+  register: mysql_apt_key_info
+  changed_when: false
+
+- name: Verifier le fingerprint officiel
+  ansible.builtin.assert:
+    that:
+      - "'BCA43417C3B485DD128EC6D4B7B3B788A8D3785C' in mysql_apt_key_info.stdout"
+    fail_msg: "Cle MySQL non reconnue. Arret de l'installation."
+
+- name: Convertir la cle en trousseau GPG
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --dearmor
+      - --batch
+      - --yes
+      - --output
+      - /tmp/mysql-apt.gpg
+      - "{{ mysql_apt_key_ascii }}"
+  changed_when: false
+
+- name: Examiner le trousseau actuel
+  ansible.builtin.stat:
+    path: "{{ mysql_apt_keyring }}"
+  register: mysql_keyring_current
+
+- name: Examiner le nouveau trousseau
+  ansible.builtin.stat:
+    path: /tmp/mysql-apt.gpg
+  register: mysql_keyring_new
+
+- name: Installer le trousseau actualise
+  ansible.builtin.copy:
+    src: /tmp/mysql-apt.gpg
+    dest: "{{ mysql_apt_keyring }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: >
+    not mysql_keyring_current.stat.exists
+    or (mysql_keyring_current.stat.checksum | default(''))
+       != mysql_keyring_new.stat.checksum
+
+- name: Supprimer le trousseau temporaire
+  ansible.builtin.file:
+    path: /tmp/mysql-apt.gpg
+    state: absent
+
+- name: Configurer le depot officiel MySQL 8.0
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by={{ mysql_apt_keyring }}] https://repo.mysql.com/apt/ubuntu/ jammy mysql-8.0 mysql-tools"
+    filename: mysql
+    state: present
+    update_cache: false
+
+- name: Actualiser les index APT
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+
+- name: Verifier la disponibilite de MySQL Shell
+  ansible.builtin.command:
+    argv:
+      - apt-cache
+      - policy
+      - "{{ mysql_shell_package }}"
+  register: mysql_shell_policy
+  changed_when: false
+
+- name: Verifier qu'une version est disponible
+  ansible.builtin.assert:
+    that:
+      - "'Candidate: (none)' not in mysql_shell_policy.stdout"
+      - "'Candidate:' in mysql_shell_policy.stdout"
+    fail_msg: "Aucune version de MySQL Shell disponible dans APT."
+
+- name: Installer MySQL Shell
+  ansible.builtin.apt:
+    name: "{{ mysql_shell_package }}"
+    state: present
+    update_cache: false
+
+- name: Verifier la version installee
+  ansible.builtin.command:
+    argv:
+      - mysqlsh
+      - --version
+  register: mysql_shell_version
+  changed_when: false
+
+- name: Afficher la version de MySQL Shell
+  ansible.builtin.debug:
+    var: mysql_shell_version.stdout

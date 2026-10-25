@@ -1,0 +1,10 @@
+
+---
+- name: Installer MySQL Shell sur les trois noeuds
+  hosts: hadoop_cluster
+  become: true
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - mysql_shell

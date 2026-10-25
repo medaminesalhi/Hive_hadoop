@@ -1,0 +1,17 @@
+---
+mysql_cluster_nodes:
+  master:
+    ip: "192.168.56.10"
+    server_id: 10
+  worker1:
+    ip: "192.168.56.11"
+    server_id: 11
+  worker2:
+    ip: "192.168.56.12"
+    server_id: 12
+
+mysql_cluster_admin_user: "icadmin"
+mysql_cluster_admin_host: "192.168.56.%"
+
+mysql_cluster_marker: "/var/lib/mysql/.ansible-innodb-cluster-configured"
+mysql_mysqld_config: "/etc/mysql/mysql.conf.d/mysqld.cnf"

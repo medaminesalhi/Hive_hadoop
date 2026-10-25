@@ -1,0 +1,14 @@
+var options = {
+    mycnfPath: "/etc/mysql/mysql.conf.d/mysqld.cnf",
+
+    clusterAdmin: {{ ("'" ~ mysql_cluster_admin_user ~ "'@'" ~ mysql_cluster_admin_host ~ "'") | to_json }},
+
+    clusterAdminPassword: {{ mysql_cluster_admin_password | to_json }},
+
+    interactive: false,
+    restart: true
+};
+
+dba.configureInstance(undefined, options);
+
+print("Instance preparee pour InnoDB Cluster.");

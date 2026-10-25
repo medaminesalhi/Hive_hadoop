@@ -1,0 +1,256 @@
+
+---
+# ==========================================================
+# ROLE : mysql_group_replication
+# OBJECTIF : Preparer MySQL pour InnoDB Cluster
+# ==========================================================
+
+# 1. Verifier MySQL Shell
+
+- name: Verifier que MySQL Shell est installe
+  ansible.builtin.command:
+    argv:
+      - mysqlsh
+      - --version
+  register: mysqlsh_version
+  changed_when: false
+
+- name: Afficher la version de MySQL Shell
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} : {{ mysqlsh_version.stdout }}"
+
+
+# 2. Verifier les variables
+
+- name: Verifier les variables necessaires
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in mysql_cluster_nodes
+      - mysql_cluster_admin_user is defined
+      - mysql_cluster_admin_host is defined
+      - mysql_cluster_admin_password is defined
+      - mysql_cluster_admin_password | length >= 16
+      - mysql_cluster_marker is defined
+      - mysql_mysqld_config is defined
+    fail_msg: "Configuration du cluster incomplete ou mot de passe trop court."
+
+
+# 3. Verifier le fichier de configuration
+
+- name: Verifier le fichier mysqld.cnf
+  ansible.builtin.stat:
+    path: "{{ mysql_mysqld_config }}"
+  register: mysql_config_file
+
+- name: Confirmer la presence de mysqld.cnf
+  ansible.builtin.assert:
+    that:
+      - mysql_config_file.stat.exists
+      - mysql_config_file.stat.isreg
+    fail_msg: "Le fichier mysqld.cnf est introuvable."
+
+
+# 4. Verifier si l'instance est deja preparee
+
+- name: Verifier le marqueur de configuration
+  ansible.builtin.stat:
+    path: "{{ mysql_cluster_marker }}"
+  register: mysql_cluster_marker_stat
+
+
+# 5. Definir un server_id unique
+
+- name: Definir un server_id unique
+  ansible.builtin.lineinfile:
+    path: "{{ mysql_mysqld_config }}"
+    regexp: '^\s*server[-_]id\s*='
+    line: "server-id = {{ mysql_cluster_nodes[inventory_hostname].server_id }}"
+    insertafter: '^\[mysqld\]'
+    backup: true
+  notify: Restart MySQL
+
+
+# 6. Configurer les adresses d'ecoute
+
+- name: Configurer les adresses reseau MySQL
+  ansible.builtin.lineinfile:
+    path: "{{ mysql_mysqld_config }}"
+    regexp: '^\s*bind[-_]address\s*='
+    line: "bind-address = 127.0.0.1,{{ mysql_cluster_nodes[inventory_hostname].ip }}"
+    insertafter: '^\[mysqld\]'
+    backup: true
+  notify: Restart MySQL
+
+
+# 7. Definir l'adresse annoncee
+
+- name: Definir l'adresse annoncee du serveur
+  ansible.builtin.lineinfile:
+    path: "{{ mysql_mysqld_config }}"
+    regexp: '^\s*report[-_]host\s*='
+    line: "report-host = {{ mysql_cluster_nodes[inventory_hostname].ip }}"
+    insertafter: '^\[mysqld\]'
+    backup: true
+  notify: Restart MySQL
+
+
+# 8. Redemarrer MySQL si necessaire
+
+- name: Appliquer les changements de configuration
+  ansible.builtin.meta: flush_handlers
+
+
+# 9. Attendre la disponibilite de MySQL
+
+- name: Attendre le port MySQL
+  ansible.builtin.wait_for:
+    host: "{{ mysql_cluster_nodes[inventory_hostname].ip }}"
+    port: 3306
+    state: started
+    timeout: 120
+
+- name: Verifier la connexion locale MySQL
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - -NBe
+      - "SELECT 1"
+  register: mysql_local_connection
+  changed_when: false
+
+
+# 10. Preparer l'instance avec MySQL Shell
+
+- name: Preparer MySQL pour InnoDB Cluster
+  when: not mysql_cluster_marker_stat.stat.exists
+  block:
+
+    - name: Generer le script MySQL Shell protege
+      ansible.builtin.template:
+        src: configure-instance.js.j2
+        dest: /tmp/mysqlsh-configure-instance.js
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Executer dba.configureInstance
+      ansible.builtin.command:
+        argv:
+          - mysqlsh
+          - --no-wizard
+          - --no-password
+          - --socket=/var/run/mysqld/mysqld.sock
+          - --user=root
+          - --js
+          - --file=/tmp/mysqlsh-configure-instance.js
+      register: mysqlsh_config_result
+      changed_when: true
+      no_log: true
+
+    - name: Attendre MySQL apres la configuration
+      ansible.builtin.wait_for:
+        host: "{{ mysql_cluster_nodes[inventory_hostname].ip }}"
+        port: 3306
+        state: started
+        timeout: 120
+
+    - name: Verifier les parametres apres configuration
+      ansible.builtin.command:
+        argv:
+          - mysql
+          - -NBe
+          - >-
+            SELECT IF(
+              @@GLOBAL.server_id = {{ mysql_cluster_nodes[inventory_hostname].server_id }}
+              AND @@GLOBAL.gtid_mode = 'ON'
+              AND @@GLOBAL.enforce_gtid_consistency = 'ON'
+              AND @@GLOBAL.report_host = '{{ mysql_cluster_nodes[inventory_hostname].ip }}'
+              AND FIND_IN_SET(
+                '127.0.0.1',
+                REPLACE(@@GLOBAL.bind_address, ' ', '')
+              ) > 0
+              AND FIND_IN_SET(
+                '{{ mysql_cluster_nodes[inventory_hostname].ip }}',
+                REPLACE(@@GLOBAL.bind_address, ' ', '')
+              ) > 0,
+              'READY',
+              'NOT_READY'
+            )
+      register: mysql_initial_check
+      changed_when: false
+
+    - name: Confirmer la preparation de l'instance
+      ansible.builtin.assert:
+        that:
+          - mysql_initial_check.stdout == "READY"
+        fail_msg: "L'instance MySQL n'est pas encore correctement configuree."
+
+    - name: Creer le marqueur de configuration reussie
+      ansible.builtin.file:
+        path: "{{ mysql_cluster_marker }}"
+        state: touch
+        owner: root
+        group: root
+        mode: "0600"
+
+  always:
+
+    - name: Supprimer le script temporaire MySQL Shell
+      ansible.builtin.file:
+        path: /tmp/mysqlsh-configure-instance.js
+        state: absent
+
+
+# 11. Verification finale sur chaque noeud
+
+- name: Lire la configuration MySQL finale
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - -NBe
+      - >-
+        SELECT
+          @@GLOBAL.server_id,
+          @@GLOBAL.bind_address,
+          @@GLOBAL.report_host,
+          @@GLOBAL.gtid_mode,
+          @@GLOBAL.enforce_gtid_consistency
+  register: mysql_final_settings
+  changed_when: false
+
+- name: Afficher la configuration finale
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} : {{ mysql_final_settings.stdout }}"
+
+- name: Confirmer que MySQL est pret pour InnoDB Cluster
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - -NBe
+      - >-
+        SELECT IF(
+          @@GLOBAL.server_id = {{ mysql_cluster_nodes[inventory_hostname].server_id }}
+          AND @@GLOBAL.gtid_mode = 'ON'
+          AND @@GLOBAL.enforce_gtid_consistency = 'ON'
+          AND @@GLOBAL.report_host = '{{ mysql_cluster_nodes[inventory_hostname].ip }}'
+          AND FIND_IN_SET(
+            '127.0.0.1',
+            REPLACE(@@GLOBAL.bind_address, ' ', '')
+          ) > 0
+          AND FIND_IN_SET(
+            '{{ mysql_cluster_nodes[inventory_hostname].ip }}',
+            REPLACE(@@GLOBAL.bind_address, ' ', '')
+          ) > 0,
+          'READY',
+          'NOT_READY'
+        )
+  register: mysql_final_check
+  changed_when: false
+
+- name: Valider l'etat final
+  ansible.builtin.assert:
+    that:
+      - mysql_final_check.stdout == "READY"
+    success_msg: "{{ inventory_hostname }} : configuration MySQL validee."
+    fail_msg: "{{ inventory_hostname }} : configuration MySQL incomplete."

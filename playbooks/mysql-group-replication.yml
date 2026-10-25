@@ -1,0 +1,9 @@
+---
+- name: Preparer les instances MySQL pour InnoDB Cluster
+  hosts: hadoop_cluster
+  become: true
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - mysql_group_replication
