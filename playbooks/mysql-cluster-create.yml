@@ -1,0 +1,116 @@
+---
+# ======================================================
+# PHASE 1 : VERIFICATION DES TROIS INSTANCES
+# Aucune modification de MySQL
+# ======================================================
+
+- name: Verifier les instances avant InnoDB Cluster
+  hosts: hadoop_cluster
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../roles/mysql_group_replication/defaults/main.yml
+
+  tasks:
+
+    - name: Verifier les parametres de replication
+      ansible.builtin.command:
+        argv:
+          - mysql
+          - -NBe
+          - >-
+            SELECT IF(
+              @@GLOBAL.server_id =
+              {{ mysql_cluster_nodes[inventory_hostname].server_id }}
+              AND @@GLOBAL.gtid_mode = 'ON'
+              AND @@GLOBAL.enforce_gtid_consistency = 'ON'
+              AND @@GLOBAL.report_host =
+              '{{ mysql_cluster_nodes[inventory_hostname].ip }}',
+              'READY',
+              'NOT_READY'
+            )
+      register: mysql_settings_check
+      changed_when: false
+      failed_when: false
+
+    - name: Verifier AdminAPI avec le compte icadmin
+      ansible.builtin.command:
+        argv:
+          - mysqlsh
+          - --mysql
+          - "--host={{ mysql_cluster_nodes[inventory_hostname].ip }}"
+          - --port=3306
+          - "--user={{ mysql_cluster_admin_user }}"
+          - --password
+          - --passwords-from-stdin
+          - --no-wizard
+          - --js
+          - --execute
+          - >-
+            var result = dba.checkInstanceConfiguration();
+            print("CHECK_STATUS=" + result.status);
+        stdin: "{{ mysql_cluster_admin_password ~ '\n' }}"
+        stdin_add_newline: false
+      register: mysql_adminapi_check
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Calculer le resultat du controle
+      ansible.builtin.set_fact:
+        mysql_preflight_ready: >-
+          {{
+            mysql_settings_check.rc == 0
+            and (mysql_settings_check.stdout | trim) == 'READY'
+            and mysql_adminapi_check.rc == 0
+            and 'CHECK_STATUS=ok' in mysql_adminapi_check.stdout
+          }}
+
+    - name: Afficher le resultat pour chaque noeud
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} :
+          {{ 'READY' if mysql_preflight_ready else 'NOT_READY' }}
+
+
+# ======================================================
+# PHASE 2 : BARRIERE DE SECURITE
+# ======================================================
+
+- name: Autoriser la creation uniquement si tout est pret
+  hosts: master
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: Valider les trois instances
+      ansible.builtin.assert:
+        that:
+          - hostvars[item].mysql_preflight_ready | default(false) | bool
+        success_msg: "{{ item }} : pret pour le cluster."
+        fail_msg: >-
+          {{ item }} : verification echouee.
+          Le cluster ne sera pas cree.
+      loop:
+        - master
+        - worker1
+        - worker2
+
+
+# ======================================================
+# PHASE 3 : CREATION EFFECTIVE DU CLUSTER
+# UNIQUEMENT SUR MASTER
+# ======================================================
+
+- name: Initialiser MySQL InnoDB Cluster
+  hosts: master
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - ../roles/mysql_group_replication/defaults/main.yml
+
+  roles:
+    - mysql_cluster_bootstrap

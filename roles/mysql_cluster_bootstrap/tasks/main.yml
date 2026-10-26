@@ -1,0 +1,128 @@
+
+---
+# =============================================
+# ROLE : mysql_cluster_bootstrap
+# Creation du cluster depuis master uniquement
+# =============================================
+
+- name: Verifier que le role s'execute sur master
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == "master"
+    fail_msg: "Le bootstrap doit s'executer uniquement sur master."
+
+- name: Verifier la presence du Metastore Hive
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - -NBe
+      - >-
+        SELECT COUNT(*)
+        FROM information_schema.tables
+        WHERE table_schema = 'metastore_db'
+  register: metastore_tables
+  changed_when: false
+
+- name: Verifier que la base Hive contient des tables
+  ansible.builtin.assert:
+    that:
+      - metastore_tables.stdout | int > 0
+    fail_msg: "La base metastore_db est absente ou vide."
+
+- name: Rechercher les sauvegardes du Metastore
+  ansible.builtin.find:
+    paths: /home/vagrant
+    patterns: "metastore_db-before-innodb-cluster-*.sql"
+    file_type: file
+    recurse: false
+  register: mysql_backup_files
+
+- name: Verifier qu'une sauvegarde non vide existe
+  ansible.builtin.assert:
+    that:
+      - mysql_backup_files.matched | int > 0
+      - >-
+        (
+          mysql_backup_files.files
+          | selectattr('size', 'gt', 1000)
+          | list
+          | length
+        ) > 0
+    fail_msg: "Aucune sauvegarde SQL non vide n'a ete trouvee."
+
+- name: Verifier l'absence de metadonnees InnoDB Cluster
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - -NBe
+      - >-
+        SELECT COUNT(*)
+        FROM information_schema.schemata
+        WHERE schema_name = 'mysql_innodb_cluster_metadata'
+  register: existing_cluster_metadata
+  changed_when: false
+
+- name: Empecher une nouvelle initialisation
+  ansible.builtin.assert:
+    that:
+      - existing_cluster_metadata.stdout | trim == "0"
+    fail_msg: >-
+      Des metadonnees InnoDB Cluster existent deja.
+      Examiner le cluster avant toute nouvelle creation.
+
+- name: Generer le script MySQL Shell
+  ansible.builtin.template:
+    src: create-cluster.js.j2
+    dest: "{{ mysql_cluster_script_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Creer InnoDB Cluster sur master
+  block:
+    - name: Executer dba.createCluster
+      ansible.builtin.command:
+        argv:
+          - mysqlsh
+          - --mysql
+          - "--host={{ mysql_cluster_seed_host }}"
+          - "--port={{ mysql_cluster_seed_port }}"
+          - "--user={{ mysql_cluster_admin_user }}"
+          - --passwords-from-stdin
+          - --no-wizard
+          - --js
+          - "--file={{ mysql_cluster_script_path }}"
+        stdin: "{{ mysql_cluster_admin_password ~ '\n' }}"
+        stdin_add_newline: false
+      register: cluster_creation
+      changed_when: true
+      no_log: true
+
+  always:
+    - name: Supprimer le script temporaire
+      ansible.builtin.file:
+        path: "{{ mysql_cluster_script_path }}"
+        state: absent
+
+- name: Lire les membres du groupe
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - -NBe
+      - >-
+        SELECT MEMBER_HOST, MEMBER_ROLE, MEMBER_STATE
+        FROM performance_schema.replication_group_members
+  register: mysql_cluster_members
+  changed_when: false
+
+- name: Afficher les membres du cluster
+  ansible.builtin.debug:
+    var: mysql_cluster_members.stdout_lines
+
+- name: Confirmer la presence du primaire initial
+  ansible.builtin.assert:
+    that:
+      - "'PRIMARY' in mysql_cluster_members.stdout"
+      - "'ONLINE' in mysql_cluster_members.stdout"
+    success_msg: "Le primaire initial du cluster est ONLINE."
+    fail_msg: "Le cluster n'est pas dans l'etat attendu."

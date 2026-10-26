@@ -1,0 +1,13 @@
+
+var clusterName = {{ mysql_cluster_name | to_json }};
+
+print("Creation du cluster : " + clusterName);
+
+var cluster = dba.createCluster(clusterName, {
+    multiPrimary: false,
+    communicationStack: "MYSQL"
+});
+
+print("Cluster initialise.");
+
+print(JSON.stringify(cluster.status(), null, 2));

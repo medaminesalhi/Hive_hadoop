@@ -1,0 +1,8 @@
+
+---
+mysql_cluster_name: "hive_mysql_ha"
+
+mysql_cluster_seed_host: "192.168.56.10"
+mysql_cluster_seed_port: 3306
+
+mysql_cluster_script_path: "/run/mysqlsh-create-cluster.js"
