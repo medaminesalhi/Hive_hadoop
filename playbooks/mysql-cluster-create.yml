@@ -34,6 +34,7 @@
       changed_when: false
       failed_when: false
 
+
     - name: Verifier AdminAPI avec le compte icadmin
       ansible.builtin.command:
         argv:
@@ -44,18 +45,30 @@
           - "--user={{ mysql_cluster_admin_user }}"
           - --password
           - --passwords-from-stdin
-          - --no-wizard
           - --js
           - --execute
           - >-
             var result = dba.checkInstanceConfiguration();
             print("CHECK_STATUS=" + result.status);
-        stdin: "{{ mysql_cluster_admin_password ~ '\n' }}"
-        stdin_add_newline: false
+        stdin: "{{ mysql_cluster_admin_password }}"
+        stdin_add_newline: true
+      environment:
+        MYSQLSH_CREDENTIAL_STORE_HELPER: "<disabled>"
       register: mysql_adminapi_check
       changed_when: false
       failed_when: false
       no_log: true
+
+
+    - name: Afficher le diagnostic des verifications
+      ansible.builtin.debug:
+        msg:
+          - "Noeud : {{ inventory_hostname }}"
+          - "Code retour MySQL : {{ mysql_settings_check.rc }}"
+          - "Etat configuration : {{ mysql_settings_check.stdout | trim }}"
+          - "Code retour MySQL Shell : {{ mysql_adminapi_check.rc }}"
+          - "AdminAPI OK : {{ 'CHECK_STATUS=ok' in (mysql_adminapi_check.stdout | default('')) }}"
+
 
     - name: Calculer le resultat du controle
       ansible.builtin.set_fact:

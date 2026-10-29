@@ -1,0 +1,183 @@
+---
+- name: Verifier le noeud du role Hive HA
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in hive_ha_nodes
+      - inventory_hostname in hive_ha_db_endpoints
+    fail_msg: "Role Hive HA prevu pour master et worker1 seulement."
+
+- name: Deployer Hive 4.0.1 depuis l'archive du controleur sur worker1
+  ansible.builtin.unarchive:
+    src: "{{ hive_ha_archive }}"
+    dest: "/home/vagrant"
+    owner: "{{ hive_ha_user }}"
+    group: "{{ hive_ha_user }}"
+    creates: "{{ hive_ha_home }}/bin/hive"
+  when: inventory_hostname == 'worker1'
+  no_log: true
+
+- name: Verifier l'installation de Hive
+  ansible.builtin.stat:
+    path: "{{ hive_ha_home }}/bin/hive"
+  register: hive_ha_binary
+
+- name: Verifier la configuration Hive existante
+  ansible.builtin.stat:
+    path: "{{ hive_ha_home }}/conf/hive-site.xml"
+  register: hive_ha_base_xml
+
+- name: Verifier le repertoire Hadoop
+  ansible.builtin.stat:
+    path: "{{ hive_ha_hadoop_home }}/bin/hdfs"
+  register: hive_ha_hdfs
+
+- name: Valider les pre-requis
+  ansible.builtin.assert:
+    that:
+      - hive_ha_binary.stat.exists
+      - hive_ha_base_xml.stat.exists
+      - hive_ha_hdfs.stat.exists
+    fail_msg: "Verifier /home/vagrant/apache-hive-4.0.1-bin et /opt/hadoop sur le noeud."
+
+- name: Tester le port JDBC MySQL depuis le noeud Hive
+  ansible.builtin.wait_for:
+    host: "{{ hive_ha_db_endpoints[inventory_hostname].split(':')[0] }}"
+    port: "{{ hive_ha_db_endpoints[inventory_hostname].split(':')[1] | int }}"
+    timeout: 10
+    state: started
+
+- name: Verifier l'acces ZooKeeper local
+  ansible.builtin.wait_for:
+    host: "{{ hive_ha_nodes[inventory_hostname] }}"
+    port: 2181
+    timeout: 10
+    state: started
+
+- name: Creer les repertoires du deploiement Hive HA
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ hive_ha_user }}"
+    group: "{{ hive_ha_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ hive_ha_workdir }}", mode: '0750'}
+    - {path: "{{ hive_ha_workdir }}/conf-metastore", mode: '0700'}
+    - {path: "{{ hive_ha_workdir }}/conf-hs2", mode: '0700'}
+    - {path: "{{ hive_ha_workdir }}/logs/metastore", mode: '0750'}
+    - {path: "{{ hive_ha_workdir }}/logs/hs2", mode: '0750'}
+
+- name: Deployer le configurateur Hive XML
+  ansible.builtin.copy:
+    src: configure_hive_ha.py
+    dest: "{{ hive_ha_workdir }}/configure_hive_ha.py"
+    owner: "{{ hive_ha_user }}"
+    group: "{{ hive_ha_user }}"
+    mode: '0700'
+
+- name: Generer la configuration du Metastore
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ hive_ha_workdir }}/configure_hive_ha.py"
+      - --source
+      - "{{ hive_ha_home }}/conf/hive-site.xml"
+      - --target
+      - "{{ hive_ha_workdir }}/conf-metastore/hive-site.xml"
+      - --service
+      - metastore
+      - --node-ip
+      - "{{ hive_ha_nodes[inventory_hostname] }}"
+      - --db-endpoint
+      - "{{ hive_ha_db_endpoints[inventory_hostname] }}"
+      - --zk-quorum
+      - "{{ hive_ha_zookeeper_quorum }}"
+      - --metastore-uris
+      - "{{ hive_ha_metastore_uris }}"
+      - --namespace
+      - "{{ hive_ha_hs2_namespace }}"
+  become_user: "{{ hive_ha_user }}"
+  register: hive_ha_metastore_xml
+  changed_when: "'UPDATED' in hive_ha_metastore_xml.stdout"
+  notify: Restart hive-metastore
+
+- name: Generer la configuration de HiveServer2
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ hive_ha_workdir }}/configure_hive_ha.py"
+      - --source
+      - "{{ hive_ha_home }}/conf/hive-site.xml"
+      - --target
+      - "{{ hive_ha_workdir }}/conf-hs2/hive-site.xml"
+      - --service
+      - hs2
+      - --node-ip
+      - "{{ hive_ha_nodes[inventory_hostname] }}"
+      - --db-endpoint
+      - "{{ hive_ha_db_endpoints[inventory_hostname] }}"
+      - --zk-quorum
+      - "{{ hive_ha_zookeeper_quorum }}"
+      - --metastore-uris
+      - "{{ hive_ha_metastore_uris }}"
+      - --namespace
+      - "{{ hive_ha_hs2_namespace }}"
+  become_user: "{{ hive_ha_user }}"
+  register: hive_ha_hs2_xml
+  changed_when: "'UPDATED' in hive_ha_hs2_xml.stdout"
+  notify: Restart hive-hs2
+
+- name: Installer l'unite systemd Hive Metastore
+  ansible.builtin.template:
+    src: hive-metastore.service.j2
+    dest: /etc/systemd/system/hive-metastore.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart hive-metastore
+
+- name: Installer l'unite systemd HiveServer2
+  ansible.builtin.template:
+    src: hive-hs2.service.j2
+    dest: /etc/systemd/system/hive-hs2.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart hive-hs2
+
+- name: Recharger systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Demarrer et activer Hive Metastore
+  ansible.builtin.systemd:
+    name: hive-metastore
+    enabled: true
+    state: started
+
+- name: Attendre le port Thrift Metastore
+  ansible.builtin.wait_for:
+    host: "{{ hive_ha_nodes[inventory_hostname] }}"
+    port: "{{ hive_ha_metastore_port }}"
+    state: started
+    timeout: 180
+
+- name: Demarrer et activer HiveServer2
+  ansible.builtin.systemd:
+    name: hive-hs2
+    enabled: true
+    state: started
+
+- name: Attendre le port Thrift HiveServer2
+  ansible.builtin.wait_for:
+    host: "{{ hive_ha_nodes[inventory_hostname] }}"
+    port: "{{ hive_ha_hs2_port }}"
+    state: started
+    timeout: 240
+
+- name: Afficher le resultat du deploiement
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} : Metastore sur {{ hive_ha_nodes[inventory_hostname] }}:{{ hive_ha_metastore_port }},
+      HiveServer2 sur {{ hive_ha_nodes[inventory_hostname] }}:{{ hive_ha_hs2_port }}.
+      Verifier la connexion Beeline et l'enregistrement ZooKeeper ensuite.

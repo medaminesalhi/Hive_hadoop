@@ -1,0 +1,46 @@
+---
+# Controller: master (/home/vagrant/cluster-ansible).
+# Ne touche pas a MySQL InnoDB Cluster ni au schema metastore_db.
+- name: Archiver l'installation Hive existante sur le controleur master
+  hosts: master
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Verifier l'installation Hive source
+      ansible.builtin.stat:
+        path: /home/vagrant/apache-hive-4.0.1-bin/conf/hive-site.xml
+      register: hive_ha_source_xml
+
+    - name: Refuser un Hive sans configuration source
+      ansible.builtin.assert:
+        that:
+          - hive_ha_source_xml.stat.exists
+        fail_msg: "Fichier hive-site.xml absent sur master."
+
+    - name: Creer une archive privee depuis l'installation Hive sur master
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -C
+          - /home/vagrant
+          - -czf
+          - /home/vagrant/hive-4.0.1-ha-source.tar.gz
+          - apache-hive-4.0.1-bin
+        creates: /home/vagrant/hive-4.0.1-ha-source.tar.gz
+      delegate_to: localhost
+
+    - name: Restreindre les permissions de l'archive contenant hive-site.xml
+      ansible.builtin.file:
+        path: /home/vagrant/hive-4.0.1-ha-source.tar.gz
+        owner: vagrant
+        group: vagrant
+        mode: '0600'
+      delegate_to: localhost
+
+- name: Deployer Hive Metastore et HiveServer2 redondants
+  hosts: master,worker1
+  become: true
+  gather_facts: true
+  serial: 1
+  roles:
+    - hive_ha

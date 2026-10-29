@@ -88,12 +88,14 @@
           - "--host={{ mysql_cluster_seed_host }}"
           - "--port={{ mysql_cluster_seed_port }}"
           - "--user={{ mysql_cluster_admin_user }}"
+          - --password
           - --passwords-from-stdin
-          - --no-wizard
           - --js
           - "--file={{ mysql_cluster_script_path }}"
-        stdin: "{{ mysql_cluster_admin_password ~ '\n' }}"
-        stdin_add_newline: false
+        stdin: "{{ mysql_cluster_admin_password }}"
+        stdin_add_newline: true
+      environment:
+        MYSQLSH_CREDENTIAL_STORE_HELPER: "<disabled>"
       register: cluster_creation
       changed_when: true
       no_log: true

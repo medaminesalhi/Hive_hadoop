@@ -1,0 +1,21 @@
+---
+hive_ha_version: "4.0.1"
+hive_ha_user: "vagrant"
+hive_ha_home: "/home/vagrant/apache-hive-4.0.1-bin"
+hive_ha_workdir: "/home/vagrant/hive-ha"
+hive_ha_archive: "/home/vagrant/hive-4.0.1-ha-source.tar.gz"
+hive_ha_java_home: "/usr/lib/jvm/java-11-openjdk-amd64"
+hive_ha_hadoop_home: "/opt/hadoop"
+hive_ha_metastore_port: 9083
+hive_ha_hs2_port: 10000
+hive_ha_zookeeper_quorum: "master:2181,worker1:2181,worker2:2181"
+hive_ha_hs2_namespace: "hiveserver2"
+hive_ha_metastore_uris: "thrift://master:9083,thrift://worker1:9083"
+hive_ha_nodes:
+  master: "192.168.56.10"
+  worker1: "192.168.56.11"
+# Mode transitoire : MySQL Cluster n'a qu'un membre; Router ne fonctionne pas encore.
+# Si MySQL master n'ecoute pas sur 127.0.0.1, corriger le bind-address en premier.
+hive_ha_db_endpoints:
+  master: "192.168.56.10:3306"
+  worker1: "192.168.56.10:3306"

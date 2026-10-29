@@ -1,0 +1,24 @@
+[Unit]
+Description=Apache Hive {{ hive_ha_version }} Metastore (HA node)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ hive_ha_user }}
+Group={{ hive_ha_user }}
+Environment="JAVA_HOME={{ hive_ha_java_home }}"
+Environment="HADOOP_HOME={{ hive_ha_hadoop_home }}"
+Environment="HADOOP_CONF_DIR={{ hive_ha_hadoop_home }}/etc/hadoop"
+Environment="HIVE_HOME={{ hive_ha_home }}"
+Environment="HIVE_CONF_DIR={{ hive_ha_workdir }}/conf-metastore"
+Environment="HIVE_LOG_DIR={{ hive_ha_workdir }}/logs/metastore"
+ExecStart={{ hive_ha_home }}/bin/hive --service metastore -p {{ hive_ha_metastore_port }}
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=240
+UMask=0077
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

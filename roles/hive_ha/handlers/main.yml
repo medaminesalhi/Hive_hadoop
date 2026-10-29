@@ -1,0 +1,12 @@
+---
+- name: Restart hive-metastore
+  ansible.builtin.systemd:
+    name: hive-metastore
+    daemon_reload: true
+    state: restarted
+
+- name: Restart hive-hs2
+  ansible.builtin.systemd:
+    name: hive-hs2
+    daemon_reload: true
+    state: restarted
