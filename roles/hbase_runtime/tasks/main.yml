@@ -1,0 +1,44 @@
+---
+# ==========================================
+# ROLE : HBASE RUNTIME
+# ==========================================
+
+- name: Verifier l'architecture HBase
+  ansible.builtin.assert:
+    that:
+      - "'hbase_masters' in groups"
+      - "'hbase_regionservers' in groups"
+      - "'workers' in groups"
+      - "groups['hbase_masters'] | length >= 2"
+      - "groups['hbase_regionservers'] | length >= 2"
+      - "hbase_runtime_primary_master in groups['hbase_masters']"
+    fail_msg: "Inventaire HBase HA invalide."
+
+- name: Verifier l'installation HBase
+  ansible.builtin.stat:
+    path: "{{ hbase_runtime_home }}/bin/hbase"
+  register: hbase_runtime_binary
+
+- name: Verifier la configuration HBase
+  ansible.builtin.stat:
+    path: "{{ hbase_runtime_conf }}/hbase-site.xml"
+  register: hbase_runtime_xml
+
+- name: Valider les fichiers HBase
+  ansible.builtin.assert:
+    that:
+      - hbase_runtime_binary.stat.exists
+      - hbase_runtime_xml.stat.exists
+    fail_msg: "Installer et configurer HBase avant le demarrage."
+
+- name: Demarrer et verifier ZooKeeper
+  ansible.builtin.import_tasks: zookeeper.yml
+
+- name: Demarrer et verifier Hadoop
+  ansible.builtin.import_tasks: hadoop.yml
+
+- name: Demarrer les services HBase HA
+  ansible.builtin.import_tasks: services.yml
+
+- name: Valider le cluster HBase HA
+  ansible.builtin.import_tasks: validate.yml

@@ -1,0 +1,265 @@
+---
+# ==========================================
+# 1. PROTEGER LES DONNEES HDFS
+# ==========================================
+
+- name: Verifier les metadonnees du NameNode
+  ansible.builtin.stat:
+    path: "{{ hbase_runtime_namenode_dir }}/current/VERSION"
+  register: hbase_nn_metadata
+  when: inventory_hostname == hbase_runtime_namenode
+
+- name: Refuser le formatage du NameNode
+  ansible.builtin.assert:
+    that:
+      - hbase_nn_metadata.stat.exists
+    fail_msg: >-
+      Metadonnees HDFS absentes.
+      Aucun formatage ne sera effectue.
+  when: inventory_hostname == hbase_runtime_namenode
+
+# ==========================================
+# 2. NAMENODE
+# ==========================================
+
+- name: Verifier le NameNode
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - --daemon
+      - status
+      - namenode
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  register: hbase_nn_status
+  failed_when: false
+  changed_when: false
+  when: inventory_hostname == hbase_runtime_namenode
+
+- name: Demarrer le NameNode si arrete
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - --daemon
+      - start
+      - namenode
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  when:
+    - inventory_hostname == hbase_runtime_namenode
+    - hbase_nn_status.rc | default(1) != 0
+
+- name: Attendre le NameNode HDFS
+  ansible.builtin.wait_for:
+    host: "{{ hbase_runtime_namenode }}"
+    port: "{{ hbase_runtime_namenode_port }}"
+    timeout: 120
+
+# ==========================================
+# 3. SECONDARY NAMENODE
+# ==========================================
+
+- name: Verifier le SecondaryNameNode
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - --daemon
+      - status
+      - secondarynamenode
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  register: hbase_snn_status
+  failed_when: false
+  changed_when: false
+  when:
+    - hbase_runtime_start_secondary | bool
+    - inventory_hostname == hbase_runtime_namenode
+
+- name: Demarrer le SecondaryNameNode si arrete
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - --daemon
+      - start
+      - secondarynamenode
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  when:
+    - hbase_runtime_start_secondary | bool
+    - inventory_hostname == hbase_runtime_namenode
+    - hbase_snn_status.rc | default(1) != 0
+
+# ==========================================
+# 4. DATANODES
+# ==========================================
+
+- name: Verifier le DataNode
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - --daemon
+      - status
+      - datanode
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  register: hbase_dn_status
+  failed_when: false
+  changed_when: false
+  when: inventory_hostname in groups['workers']
+
+- name: Demarrer le DataNode si arrete
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - --daemon
+      - start
+      - datanode
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  when:
+    - inventory_hostname in groups['workers']
+    - hbase_dn_status.rc | default(1) != 0
+
+# ==========================================
+# 5. VALIDATION HDFS
+# ==========================================
+
+- name: Attendre les DataNodes actifs
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - dfsadmin
+      - -report
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  register: hbase_hdfs_report
+  changed_when: false
+  retries: 15
+  delay: 5
+  until: >-
+    hbase_hdfs_report.rc == 0 and
+    ('Live datanodes (' ~
+    (groups['workers'] | length | string) ~
+    '):') in hbase_hdfs_report.stdout
+  when: inventory_hostname == hbase_runtime_namenode
+
+- name: Verifier le mode safemode HDFS
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - dfsadmin
+      - -safemode
+      - get
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  register: hbase_safemode
+  changed_when: false
+  when: inventory_hostname == hbase_runtime_namenode
+
+- name: Valider HDFS hors safemode
+  ansible.builtin.assert:
+    that:
+      - "'OFF' in hbase_safemode.stdout"
+    fail_msg: "HDFS est encore en safemode."
+  when: inventory_hostname == hbase_runtime_namenode
+
+# ==========================================
+# 6. PREPARER /hbase SUR HDFS
+# ==========================================
+
+- name: Verifier le repertoire HDFS HBase
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - dfs
+      - -test
+      - -d
+      - "{{ hbase_runtime_hdfs_dir }}"
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  register: hbase_hdfs_dir_check
+  changed_when: false
+  failed_when: hbase_hdfs_dir_check.rc not in [0, 1]
+  when: inventory_hostname == hbase_runtime_namenode
+
+- name: Creer le repertoire HDFS HBase si absent
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/hdfs"
+      - dfs
+      - -mkdir
+      - -p
+      - "{{ hbase_runtime_hdfs_dir }}"
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  when:
+    - inventory_hostname == hbase_runtime_namenode
+    - hbase_hdfs_dir_check.rc | default(0) == 1
+
+# ==========================================
+# 7. YARN - RESOURCEMANAGER
+# ==========================================
+
+- name: Verifier le ResourceManager
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/yarn"
+      - --daemon
+      - status
+      - resourcemanager
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  register: hbase_rm_status
+  failed_when: false
+  changed_when: false
+  when:
+    - hbase_runtime_start_yarn | bool
+    - inventory_hostname == hbase_runtime_namenode
+
+- name: Demarrer le ResourceManager si arrete
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/yarn"
+      - --daemon
+      - start
+      - resourcemanager
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  when:
+    - hbase_runtime_start_yarn | bool
+    - inventory_hostname == hbase_runtime_namenode
+    - hbase_rm_status.rc | default(1) != 0
+
+# ==========================================
+# 8. YARN - NODEMANAGERS
+# ==========================================
+
+- name: Verifier le NodeManager
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/yarn"
+      - --daemon
+      - status
+      - nodemanager
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  register: hbase_nm_status
+  failed_when: false
+  changed_when: false
+  when:
+    - hbase_runtime_start_yarn | bool
+    - inventory_hostname in groups['workers']
+
+- name: Demarrer le NodeManager si arrete
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_hadoop_home }}/bin/yarn"
+      - --daemon
+      - start
+      - nodemanager
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hadoop_env }}"
+  when:
+    - hbase_runtime_start_yarn | bool
+    - inventory_hostname in groups['workers']
+    - hbase_nm_status.rc | default(1) != 0

@@ -1,0 +1,9 @@
+---
+- name: Demarrer Hadoop ZooKeeper et HBase HA
+  hosts: hbase_cluster
+
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: hbase_runtime

@@ -1,0 +1,126 @@
+---
+# ==========================================
+# 1. VERIFIER LES HMASTERS
+# ==========================================
+
+- name: Verifier le service HMaster
+  ansible.builtin.command:
+    cmd: systemctl is-active hbase-master
+  register: hbase_master_status
+  changed_when: false
+  when: inventory_hostname in groups['hbase_masters']
+
+- name: Attendre le port HMaster
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ hbase_runtime_master_port }}"
+    timeout: 180
+  when: inventory_hostname in groups['hbase_masters']
+
+# ==========================================
+# 2. VERIFIER LES REGIONSERVERS
+# ==========================================
+
+- name: Verifier le service RegionServer
+  ansible.builtin.command:
+    cmd: systemctl is-active hbase-regionserver
+  register: hbase_rs_status
+  changed_when: false
+  when: inventory_hostname in groups['hbase_regionservers']
+
+- name: Attendre le port RegionServer
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ hbase_runtime_regionserver_port }}"
+    timeout: 180
+  when: inventory_hostname in groups['hbase_regionservers']
+
+# ==========================================
+# 3. VERIFIER HBASE SHELL
+# ==========================================
+
+- name: Verifier le statut du cluster HBase
+  ansible.builtin.shell: |
+    printf "status 'simple'\n" | \
+      timeout 150s {{ hbase_runtime_home }}/bin/hbase shell -n
+  args:
+    executable: /bin/bash
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hbase_env }}"
+  register: hbase_cluster_status
+  changed_when: false
+  retries: 8
+  delay: 10
+  until:
+    - hbase_cluster_status.rc == 0
+    - >-
+      ((groups['hbase_regionservers'] | length | string) ~
+       ' live servers') in hbase_cluster_status.stdout
+  when: inventory_hostname == hbase_runtime_primary_master
+
+- name: Afficher le statut HBase
+  ansible.builtin.debug:
+    msg: "{{ hbase_cluster_status.stdout_lines }}"
+  when: inventory_hostname == hbase_runtime_primary_master
+
+# ==========================================
+# 4. TEST FONCTIONNEL HBASE
+# ==========================================
+
+- name: Creer le script de test HBase
+  ansible.builtin.copy:
+    dest: /tmp/hbase-runtime-smoke.rb
+    owner: "{{ hbase_runtime_user }}"
+    group: "{{ hbase_runtime_group }}"
+    mode: "0644"
+    content: |
+      table_name = '{{ hbase_runtime_smoke_table }}'
+
+      unless exists(table_name)
+        create table_name, 'cf'
+      end
+
+      put table_name, 'row1', 'cf:result', 'ok'
+      get table_name, 'row1'
+  when:
+    - hbase_runtime_smoke_test | bool
+    - inventory_hostname == hbase_runtime_primary_master
+
+- name: Tester une ecriture et une lecture HBase
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - 180s
+      - "{{ hbase_runtime_home }}/bin/hbase"
+      - shell
+      - -n
+      - /tmp/hbase-runtime-smoke.rb
+  become_user: "{{ hbase_runtime_user }}"
+  environment: "{{ hbase_runtime_hbase_env }}"
+  register: hbase_smoke_result
+  changed_when: true
+  when:
+    - hbase_runtime_smoke_test | bool
+    - inventory_hostname == hbase_runtime_primary_master
+
+- name: Verifier le resultat du test HBase
+  ansible.builtin.assert:
+    that:
+      - hbase_smoke_result.rc == 0
+      - "'cf:result' in hbase_smoke_result.stdout"
+      - "'value=ok' in hbase_smoke_result.stdout"
+    fail_msg: "Le test de lecture/ecriture HBase a echoue."
+    success_msg: "Lecture et ecriture HBase fonctionnelles."
+  when:
+    - hbase_runtime_smoke_test | bool
+    - inventory_hostname == hbase_runtime_primary_master
+
+# ==========================================
+# 5. RESULTAT FINAL
+# ==========================================
+
+- name: Confirmer le demarrage du cluster
+  ansible.builtin.debug:
+    msg: >-
+      HBase HA demarre et verifie sur
+      {{ inventory_hostname }}.

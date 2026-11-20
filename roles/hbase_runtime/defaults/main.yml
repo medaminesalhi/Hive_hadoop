@@ -1,0 +1,86 @@
+---
+# ==========================================
+# UTILISATEUR ET JAVA
+# ==========================================
+
+hbase_runtime_user: "vagrant"
+hbase_runtime_group: "vagrant"
+
+hbase_runtime_java_home: "/usr/lib/jvm/java-11-openjdk-amd64"
+
+# ==========================================
+# HADOOP EXISTANT
+# ==========================================
+
+hbase_runtime_hadoop_home: "/opt/hadoop"
+hbase_runtime_hadoop_conf: "/opt/hadoop/etc/hadoop"
+
+hbase_runtime_namenode: "master"
+hbase_runtime_namenode_dir: "/var/lib/hadoop/hdfs/namenode"
+hbase_runtime_namenode_port: 9000
+
+hbase_runtime_hdfs_dir: "/hbase"
+
+hbase_runtime_start_secondary: true
+hbase_runtime_start_yarn: true
+
+# ==========================================
+# ZOOKEEPER EXISTANT
+# ==========================================
+
+hbase_runtime_zk_home: "/opt/zookeeper"
+hbase_runtime_zk_conf: "/etc/zookeeper"
+hbase_runtime_zk_port: 2181
+
+# ==========================================
+# HBASE
+# ==========================================
+
+hbase_runtime_home: "/opt/hbase"
+hbase_runtime_conf: "/opt/hbase/conf"
+
+hbase_runtime_primary_master: "master"
+
+hbase_runtime_master_port: 16000
+hbase_runtime_master_ui_port: 16010
+
+hbase_runtime_regionserver_port: 16020
+hbase_runtime_regionserver_ui_port: 16030
+
+# ==========================================
+# HIVE (OPTIONNEL)
+# ==========================================
+
+hbase_runtime_start_hive: false
+hbase_runtime_hive_nodes:
+  - master
+  - worker1
+
+hbase_runtime_mysql_host: "192.168.56.10"
+hbase_runtime_mysql_port: 3306
+
+# ==========================================
+# TESTS
+# ==========================================
+
+hbase_runtime_smoke_test: true
+hbase_runtime_smoke_table: "ansible_hbase_smoke"
+
+# ==========================================
+# ENVIRONNEMENT HADOOP
+# ==========================================
+
+hbase_runtime_hadoop_env:
+  JAVA_HOME: "{{ hbase_runtime_java_home }}"
+  HADOOP_HOME: "{{ hbase_runtime_hadoop_home }}"
+  HADOOP_CONF_DIR: "{{ hbase_runtime_hadoop_conf }}"
+
+# ==========================================
+# ENVIRONNEMENT HBASE
+# ==========================================
+
+hbase_runtime_hbase_env:
+  JAVA_HOME: "{{ hbase_runtime_java_home }}"
+  HBASE_HOME: "{{ hbase_runtime_home }}"
+  HBASE_CONF_DIR: "{{ hbase_runtime_conf }}"
+  HADOOP_CONF_DIR: "{{ hbase_runtime_hadoop_conf }}"

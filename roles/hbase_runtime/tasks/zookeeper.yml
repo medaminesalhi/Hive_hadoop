@@ -1,0 +1,49 @@
+---
+# ==========================================
+# DEMARRAGE ZOOKEEPER
+# ==========================================
+
+- name: Demarrer ZooKeeper
+  ansible.builtin.systemd:
+    name: zookeeper
+    state: started
+    enabled: true
+
+- name: Attendre ZooKeeper local
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ hbase_runtime_zk_port }}"
+    state: started
+    timeout: 90
+
+- name: Attendre l'accessibilite du quorum ZooKeeper
+  ansible.builtin.wait_for:
+    host: "{{ item }}"
+    port: "{{ hbase_runtime_zk_port }}"
+    state: started
+    timeout: 60
+  loop:
+    - master
+    - worker1
+    - worker2
+
+- name: Verifier le mode ZooKeeper
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_runtime_zk_home }}/bin/zkServer.sh"
+      - --config
+      - "{{ hbase_runtime_zk_conf }}"
+      - status
+  register: hbase_zk_status
+  changed_when: false
+  retries: 8
+  delay: 5
+  until:
+    - hbase_zk_status.rc == 0
+    - >-
+      'Mode:' in
+      (hbase_zk_status.stdout + hbase_zk_status.stderr)
+
+- name: Afficher le mode ZooKeeper
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} : {{ hbase_zk_status.stdout_lines }}"

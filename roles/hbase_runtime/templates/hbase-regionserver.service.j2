@@ -1,0 +1,33 @@
+[Unit]
+Description=Apache HBase RegionServer
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+
+User={{ hbase_runtime_user }}
+Group={{ hbase_runtime_group }}
+
+WorkingDirectory={{ hbase_runtime_home }}
+
+Environment="JAVA_HOME={{ hbase_runtime_java_home }}"
+Environment="HBASE_HOME={{ hbase_runtime_home }}"
+Environment="HBASE_CONF_DIR={{ hbase_runtime_conf }}"
+Environment="HADOOP_HOME={{ hbase_runtime_hadoop_home }}"
+Environment="HADOOP_CONF_DIR={{ hbase_runtime_hadoop_conf }}"
+Environment="HBASE_MANAGES_ZK=false"
+Environment="HBASE_IDENT_STRING={{ hbase_runtime_user }}"
+Environment="HBASE_NO_REDIRECT_LOG=true"
+
+ExecStart={{ hbase_runtime_home }}/bin/hbase-daemon.sh --config {{ hbase_runtime_conf }} foreground_start regionserver
+
+Restart=on-failure
+RestartSec=10
+
+TimeoutStopSec=120
+KillMode=mixed
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

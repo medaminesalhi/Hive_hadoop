@@ -1,0 +1,138 @@
+---
+# ==========================================
+# 1. DEPLOYER LES SERVICES HBASE
+# ==========================================
+
+- name: Installer le service HMaster
+  ansible.builtin.template:
+    src: hbase-master.service.j2
+    dest: /etc/systemd/system/hbase-master.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: inventory_hostname in groups['hbase_masters']
+
+- name: Installer le service RegionServer
+  ansible.builtin.template:
+    src: hbase-regionserver.service.j2
+    dest: /etc/systemd/system/hbase-regionserver.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: inventory_hostname in groups['hbase_regionservers']
+
+# ==========================================
+# 2. RECHARGER SYSTEMD
+# ==========================================
+
+- name: Recharger systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+# ==========================================
+# 3. DEMARRER LE HMASTER PRINCIPAL
+# ==========================================
+
+- name: Demarrer le HMaster principal
+  ansible.builtin.systemd:
+    name: hbase-master
+    state: started
+    enabled: true
+  delegate_to: "{{ hbase_runtime_primary_master }}"
+  run_once: true
+
+# ==========================================
+# 4. DEMARRER LES HMASTERS DE SECOURS
+# ==========================================
+
+- name: Demarrer les HMasters de secours
+  ansible.builtin.systemd:
+    name: hbase-master
+    state: started
+    enabled: true
+  loop: >-
+    {{ groups['hbase_masters']
+       | difference([hbase_runtime_primary_master]) }}
+  delegate_to: "{{ item }}"
+  run_once: true
+
+# ==========================================
+# 5. DEMARRER LES REGIONSERVERS
+# ==========================================
+
+- name: Demarrer les RegionServers
+  ansible.builtin.systemd:
+    name: hbase-regionserver
+    state: started
+    enabled: true
+  when: inventory_hostname in groups['hbase_regionservers']
+
+# ==========================================
+# 6. HIVE OPTIONNEL
+# ==========================================
+
+- name: Verifier les services Hive installes
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ item }}.service"
+  loop:
+    - hive-metastore
+    - hive-hs2
+  register: hbase_hive_units
+  when:
+    - hbase_runtime_start_hive | bool
+    - inventory_hostname in hbase_runtime_hive_nodes
+
+- name: Valider les unites Hive
+  ansible.builtin.assert:
+    that:
+      - hbase_hive_units.results[0].stat.exists
+      - hbase_hive_units.results[1].stat.exists
+    fail_msg: "Les services Hive ne sont pas installes."
+  when:
+    - hbase_runtime_start_hive | bool
+    - inventory_hostname in hbase_runtime_hive_nodes
+
+- name: Verifier MySQL pour Hive
+  ansible.builtin.wait_for:
+    host: "{{ hbase_runtime_mysql_host }}"
+    port: "{{ hbase_runtime_mysql_port }}"
+    timeout: 15
+  when:
+    - hbase_runtime_start_hive | bool
+    - inventory_hostname in hbase_runtime_hive_nodes
+
+- name: Demarrer Hive Metastore
+  ansible.builtin.systemd:
+    name: hive-metastore
+    state: started
+    enabled: true
+  when:
+    - hbase_runtime_start_hive | bool
+    - inventory_hostname in hbase_runtime_hive_nodes
+
+- name: Attendre Hive Metastore
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: 9083
+    timeout: 180
+  when:
+    - hbase_runtime_start_hive | bool
+    - inventory_hostname in hbase_runtime_hive_nodes
+
+- name: Demarrer HiveServer2
+  ansible.builtin.systemd:
+    name: hive-hs2
+    state: started
+    enabled: true
+  when:
+    - hbase_runtime_start_hive | bool
+    - inventory_hostname in hbase_runtime_hive_nodes
+
+- name: Attendre HiveServer2
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: 10000
+    timeout: 240
+  when:
+    - hbase_runtime_start_hive | bool
+    - inventory_hostname in hbase_runtime_hive_nodes
