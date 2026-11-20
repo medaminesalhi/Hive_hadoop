@@ -1,0 +1,67 @@
+---
+# ==========================================
+# APACHE HBASE - CONFIGURATION GENERALE
+# ==========================================
+
+# Version HBase compatible avec Hadoop 3
+hbase_version: "2.5.16"
+
+# Archive officielle Hadoop 3
+hbase_archive_name: "hbase-{{ hbase_version }}-hadoop3-bin.tar.gz"
+
+hbase_download_url: >-
+  https://downloads.apache.org/hbase/{{ hbase_version }}/{{ hbase_archive_name }}
+
+# SHA-512 officiel de l'archive HBase 2.5.16 Hadoop 3
+hbase_archive_sha512: "d7ffcbcd8c8905f0f72af0d8c5e63ccc5221fd4cda3183a79ffe19fe89245d8d8a2d3c7074ab58877a9c13dd4a9fbc3dc2ec56c7ea305082eabb02b3a7d1932f"
+
+# ==========================================
+# UTILISATEUR
+# ==========================================
+
+# Le projet Hadoop existant utilise vagrant
+hbase_user: "vagrant"
+hbase_group: "vagrant"
+
+# ==========================================
+# INSTALLATION
+# ==========================================
+
+# Dossier versionne
+hbase_install_dir: "/opt/hbase-{{ hbase_version }}"
+
+# Lien symbolique stable
+hbase_home: "/opt/hbase"
+
+# Archive sur le controleur Ansible
+hbase_local_archive: "{{ playbook_dir }}/../files/{{ hbase_archive_name }}"
+
+# Archive temporaire sur chaque noeud
+hbase_remote_archive: "/tmp/{{ hbase_archive_name }}"
+
+# ==========================================
+# DEPENDANCES EXISTANTES
+# ==========================================
+
+hbase_java_home: "/usr/lib/jvm/java-11-openjdk-amd64"
+hbase_hadoop_home: "/opt/hadoop"
+hbase_hadoop_conf_dir: "/opt/hadoop/etc/hadoop"
+
+# ==========================================
+# FUTURE CONFIGURATION DISTRIBUEE
+# ==========================================
+
+hbase_namenode: "master"
+hbase_hdfs_port: 9000
+
+hbase_zookeeper_port: 2181
+hbase_zookeeper_quorum: "master,worker1,worker2"
+
+hbase_master_port: 16000
+hbase_master_info_port: 16010
+
+hbase_regionserver_port: 16020
+hbase_regionserver_info_port: 16030
+
+# Taille initiale de heap en Mo (laboratoire)
+hbase_heap_mb: 512

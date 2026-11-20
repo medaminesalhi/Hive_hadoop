@@ -1,0 +1,128 @@
+---
+# ==========================================
+# 1. PREPARER LE CACHE LOCAL
+# ==========================================
+
+- name: Creer le dossier de cache HBase sur le controleur
+  ansible.builtin.file:
+    path: "{{ hbase_local_archive | dirname }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+# ==========================================
+# 2. TELECHARGER L'ARCHIVE
+# ==========================================
+
+- name: Telecharger HBase sur le controleur
+  ansible.builtin.get_url:
+    url: "{{ hbase_download_url }}"
+    dest: "{{ hbase_local_archive }}"
+    checksum: "sha512:{{ hbase_archive_sha512 }}"
+    mode: "0644"
+    timeout: 900
+    force: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+# ==========================================
+# 3. COPIER SUR LES NOEUDS
+# ==========================================
+
+- name: Copier l'archive HBase sur chaque noeud
+  ansible.builtin.copy:
+    src: "{{ hbase_local_archive }}"
+    dest: "{{ hbase_remote_archive }}"
+    mode: "0644"
+
+- name: Calculer le SHA-512 de l'archive distante
+  ansible.builtin.stat:
+    path: "{{ hbase_remote_archive }}"
+    checksum_algorithm: sha512
+  register: hbase_remote_archive_stat
+
+- name: Valider l'integrite de l'archive distante
+  ansible.builtin.assert:
+    that:
+      - hbase_remote_archive_stat.stat.exists
+      - hbase_remote_archive_stat.stat.checksum == hbase_archive_sha512
+    fail_msg: "Archive HBase invalide sur {{ inventory_hostname }}."
+
+# ==========================================
+# 4. PREPARER LE REPERTOIRE
+# ==========================================
+
+- name: Creer le repertoire d'installation HBase
+  ansible.builtin.file:
+    path: "{{ hbase_install_dir }}"
+    state: directory
+    owner: "{{ hbase_user }}"
+    group: "{{ hbase_group }}"
+    mode: "0755"
+
+# ==========================================
+# 5. EXTRAIRE HBASE
+# ==========================================
+
+- name: Extraire Apache HBase
+  ansible.builtin.unarchive:
+    src: "{{ hbase_remote_archive }}"
+    dest: "{{ hbase_install_dir }}"
+    remote_src: true
+    extra_opts:
+      - "--strip-components=1"
+    creates: "{{ hbase_install_dir }}/bin/hbase"
+    owner: "{{ hbase_user }}"
+    group: "{{ hbase_group }}"
+
+# ==========================================
+# 6. CREER LE LIEN SYMBOLIQUE
+# ==========================================
+
+- name: Creer le lien symbolique /opt/hbase
+  ansible.builtin.file:
+    src: "{{ hbase_install_dir }}"
+    dest: "{{ hbase_home }}"
+    state: link
+    force: false
+
+# ==========================================
+# 7. VERIFICATION DE L'INSTALLATION
+# ==========================================
+
+- name: Verifier le binaire HBase
+  ansible.builtin.stat:
+    path: "{{ hbase_home }}/bin/hbase"
+  register: hbase_binary_check
+
+- name: Confirmer la presence de HBase
+  ansible.builtin.assert:
+    that:
+      - hbase_binary_check.stat.exists
+    fail_msg: "Installation HBase incomplete."
+
+- name: Verifier la version HBase
+  ansible.builtin.command:
+    argv:
+      - "{{ hbase_home }}/bin/hbase"
+      - version
+  environment:
+    JAVA_HOME: "{{ hbase_java_home }}"
+    HADOOP_HOME: "{{ hbase_hadoop_home }}"
+    HADOOP_CONF_DIR: "{{ hbase_hadoop_conf_dir }}"
+  become_user: "{{ hbase_user }}"
+  register: hbase_version_result
+  changed_when: false
+
+- name: Afficher la version HBase
+  ansible.builtin.debug:
+    msg: "{{ hbase_version_result.stdout_lines }}"
+
+- name: Confirmer la fin de l'installation
+  ansible.builtin.debug:
+    msg: >-
+      Apache HBase {{ hbase_version }} installe
+      sur {{ inventory_hostname }}.

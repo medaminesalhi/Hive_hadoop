@@ -1,0 +1,64 @@
+---
+- name: Prevalidation du cluster HBase HA
+  hosts: hbase_cluster
+  gather_facts: false
+
+  tasks:
+
+    - name: Verifier la presence de Java 11
+      ansible.builtin.stat:
+        path: /usr/lib/jvm/java-11-openjdk-amd64/bin/java
+      register: java_check
+
+    - name: Verifier la presence du client HDFS
+      ansible.builtin.stat:
+        path: /opt/hadoop/bin/hdfs
+      register: hdfs_check
+
+    - name: Valider les installations
+      ansible.builtin.assert:
+        that:
+          - java_check.stat.exists
+          - hdfs_check.stat.exists
+        fail_msg: "Java ou Hadoop est absent sur ce noeud."
+        success_msg: "Java et Hadoop sont presents."
+
+    - name: Verifier la connexion au NameNode HDFS
+      ansible.builtin.wait_for:
+        host: "{{ hostvars['master'].private_ip }}"
+        port: 9000
+        state: started
+        timeout: 5
+
+    - name: Verifier les connexions ZooKeeper
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item].private_ip }}"
+        port: 2181
+        state: started
+        timeout: 5
+      loop:
+        - master
+        - worker1
+        - worker2
+
+    - name: Verifier l'acces aux fichiers HDFS
+      ansible.builtin.command:
+        cmd: /opt/hadoop/bin/hdfs dfs -ls /
+      environment:
+        JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+        HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+      changed_when: false
+
+    - name: Consulter la memoire disponible
+      ansible.builtin.command:
+        cmd: free -h
+      changed_when: false
+      register: memory_check
+
+    - name: Afficher la memoire du noeud
+      ansible.builtin.debug:
+        msg: "{{ memory_check.stdout_lines }}"
+
+    - name: Confirmer la validation
+      ansible.builtin.debug:
+        msg: "Prerequis HBase verifies sur {{ inventory_hostname }}"

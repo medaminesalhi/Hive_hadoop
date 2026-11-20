@@ -1,0 +1,10 @@
+---
+# ==========================================
+# ROLE : APACHE HBASE
+# ==========================================
+
+- name: Verifier les prerequis HBase
+  ansible.builtin.import_tasks: prerequisites.yml
+
+- name: Installer Apache HBase
+  ansible.builtin.import_tasks: install.yml

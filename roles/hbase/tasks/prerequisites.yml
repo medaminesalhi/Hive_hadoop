@@ -1,0 +1,47 @@
+---
+- name: Verifier les groupes HBase
+  ansible.builtin.assert:
+    that:
+      - "'hbase_masters' in groups"
+      - "'hbase_regionservers' in groups"
+      - "'hbase_cluster' in groups"
+      - "groups['hbase_masters'] | length >= 2"
+      - "groups['hbase_regionservers'] | length >= 2"
+    fail_msg: "Inventaire HBase incomplet."
+
+- name: Verifier le binaire Java
+  ansible.builtin.stat:
+    path: "{{ hbase_java_home }}/bin/java"
+  register: hbase_java_check
+
+- name: Verifier le binaire HDFS
+  ansible.builtin.stat:
+    path: "{{ hbase_hadoop_home }}/bin/hdfs"
+  register: hbase_hdfs_check
+
+- name: Verifier la configuration Hadoop
+  ansible.builtin.stat:
+    path: "{{ hbase_hadoop_conf_dir }}/core-site.xml"
+  register: hbase_hadoop_conf_check
+
+- name: Valider les prerequis
+  ansible.builtin.assert:
+    that:
+      - hbase_java_check.stat.exists
+      - hbase_hdfs_check.stat.exists
+      - hbase_hadoop_conf_check.stat.exists
+    fail_msg: >-
+      Java, Hadoop ou core-site.xml est absent
+      sur {{ inventory_hostname }}.
+    success_msg: >-
+      Prerequis HBase valides sur {{ inventory_hostname }}.
+
+- name: Verifier la version Java
+  ansible.builtin.command:
+    cmd: "{{ hbase_java_home }}/bin/java -version"
+  register: hbase_java_version
+  changed_when: false
+
+- name: Afficher la version Java
+  ansible.builtin.debug:
+    msg: "{{ hbase_java_version.stderr_lines }}"

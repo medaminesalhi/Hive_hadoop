@@ -1,0 +1,9 @@
+---
+- name: Installer Apache HBase sur le cluster
+  hosts: hbase_cluster
+
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: hbase

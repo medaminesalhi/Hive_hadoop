@@ -1,0 +1,197 @@
+
+---
+- name: Preparer Hive HA sur master et worker1
+  hosts: master:worker1
+  become: true
+  gather_facts: false
+
+  vars:
+    hive_home: /home/vagrant/apache-hive-4.0.1-bin
+    hive_node_ips:
+      master: 192.168.56.10
+      worker1: 192.168.56.11
+    hive_node_ip: "{{ hive_node_ips[inventory_hostname] }}"
+
+  tasks:
+    - name: Installer Hive sur worker1 depuis master
+      ansible.builtin.unarchive:
+        src: /home/vagrant/hive-4.0.1-ha-source.tar.gz
+        dest: /home/vagrant
+        owner: vagrant
+        group: vagrant
+        creates: "{{ hive_home }}/bin/hive"
+      when: inventory_hostname == 'worker1'
+      no_log: true
+
+    - name: Verifier le binaire Hive
+      ansible.builtin.stat:
+        path: "{{ hive_home }}/bin/hive"
+      register: hive_binary
+
+    - name: Verifier hive-site.xml
+      ansible.builtin.stat:
+        path: "{{ hive_home }}/conf/hive-site.xml"
+      register: hive_xml
+
+    - name: Controler les fichiers necessaires
+      ansible.builtin.assert:
+        that:
+          - hive_binary.stat.exists
+          - hive_xml.stat.exists
+        fail_msg: "Hive ou hive-site.xml est absent."
+
+    - name: Sauvegarder la configuration Hive originale
+      ansible.builtin.copy:
+        src: "{{ hive_home }}/conf/hive-site.xml"
+        dest: "{{ hive_home }}/conf/hive-site.xml.before-ha"
+        remote_src: true
+        force: false
+        owner: vagrant
+        group: vagrant
+        mode: "0600"
+
+    - name: Configurer Hive HA sans effacer les autres proprietes
+      ansible.builtin.shell: |
+        python3 - <<'PY'
+        import os
+        import tempfile
+        import xml.etree.ElementTree as ET
+
+        path = "/home/vagrant/apache-hive-4.0.1-bin/conf/hive-site.xml"
+        tree = ET.parse(path)
+        root = tree.getroot()
+
+        quorum = (
+            "192.168.56.10:2181,"
+            "192.168.56.11:2181,"
+            "192.168.56.12:2181"
+        )
+
+        values = {
+            "javax.jdo.option.ConnectionURL":
+                "jdbc:mysql://127.0.0.1:6446/metastore_db",
+            "hive.metastore.service.discovery.mode": "zookeeper",
+            "hive.metastore.uris": quorum,
+            "hive.metastore.zookeeper.namespace": "hive_metastore_ha",
+            "hive.metastore.thrift.bind.host": os.environ["HIVE_NODE_IP"],
+            "hive.metastore.port": "9083",
+            "hive.zookeeper.quorum": quorum,
+            "hive.server2.support.dynamic.service.discovery": "true",
+            "hive.server2.zookeeper.namespace": "hiveserver2",
+            "hive.server2.thrift.bind.host": os.environ["HIVE_NODE_IP"],
+            "hive.server2.thrift.port": "10000"
+        }
+
+        changed = False
+        for name, value in values.items():
+            matches = [
+                p for p in root.findall("property")
+                if (p.findtext("name") or "").strip() == name
+            ]
+            if matches:
+                prop = matches[0]
+                for extra in matches[1:]:
+                    root.remove(extra)
+                    changed = True
+            else:
+                prop = ET.SubElement(root, "property")
+                ET.SubElement(prop, "name").text = name
+                changed = True
+
+            element = prop.find("value")
+            if element is None:
+                element = ET.SubElement(prop, "value")
+            if (element.text or "").strip() != value:
+                element.text = value
+                changed = True
+
+        if changed:
+            ET.indent(tree, space="  ")
+            fd, tmp = tempfile.mkstemp(
+                dir=os.path.dirname(path), prefix=".hive-site-"
+            )
+            os.close(fd)
+            os.chmod(tmp, 0o600)
+            try:
+                tree.write(tmp, encoding="utf-8",
+                           xml_declaration=True)
+                os.replace(tmp, path)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+            print("CONFIG_UPDATED")
+        else:
+            print("CONFIG_UNCHANGED")
+        PY
+      args:
+        executable: /bin/bash
+      environment:
+        HIVE_NODE_IP: "{{ hive_node_ip }}"
+      register: hive_config_result
+      changed_when: "'CONFIG_UPDATED' in hive_config_result.stdout"
+      no_log: true
+
+    - name: Proteger hive-site.xml
+      ansible.builtin.file:
+        path: "{{ hive_home }}/conf/hive-site.xml"
+        owner: vagrant
+        group: vagrant
+        mode: "0600"
+
+    - name: Creer le service Hive Metastore HA
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/hive-ha-metastore.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Hive 4 Metastore HA
+          Wants=network-online.target
+          After=network-online.target mysqlrouter.service
+
+          [Service]
+          Type=simple
+          User=vagrant
+          Group=vagrant
+          Environment=HIVE_HOME=/home/vagrant/apache-hive-4.0.1-bin
+          Environment=HIVE_CONF_DIR=/home/vagrant/apache-hive-4.0.1-bin/conf
+          Environment=HADOOP_HOME=/opt/hadoop
+          Environment=HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+          ExecStart=/home/vagrant/apache-hive-4.0.1-bin/bin/hive --service metastore
+          Restart=on-failure
+          RestartSec=15
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Creer le service HiveServer2 HA
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/hive-ha-hiveserver2.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Hive 4 HiveServer2 HA
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          Type=simple
+          User=vagrant
+          Group=vagrant
+          Environment=HIVE_HOME=/home/vagrant/apache-hive-4.0.1-bin
+          Environment=HIVE_CONF_DIR=/home/vagrant/apache-hive-4.0.1-bin/conf
+          Environment=HADOOP_HOME=/opt/hadoop
+          Environment=HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+          ExecStart=/home/vagrant/apache-hive-4.0.1-bin/bin/hive --service hiveserver2
+          Restart=on-failure
+          RestartSec=15
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Recharger la configuration systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Confirmer la preparation
+      ansible.builtin.debug:
+        msg: "Hive HA prepare sur {{ inventory_hostname }} ({{ hive_node_ip }})"
