@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+# ======================================
+# JAVA
+# ======================================
+
+export JAVA_HOME="{{ hbase_config_java_home }}"
+
+# ======================================
+# HADOOP
+# ======================================
+
+export HADOOP_HOME="{{ hbase_config_hadoop_home }}"
+
+export HADOOP_CONF_DIR="{{ hbase_config_hadoop_conf_dir }}"
+
+export HBASE_CLASSPATH="${HADOOP_CONF_DIR}"
+
+# Utiliser les bibliotheques Hadoop 3
+# fournies avec la distribution HBase
+export HBASE_DISABLE_HADOOP_CLASSPATH_LOOKUP=true
+
+# ======================================
+# ZOOKEEPER EXISTANT
+# ======================================
+
+export HBASE_MANAGES_ZK={{ hbase_config_manages_zk | string | lower }}
+
+# ======================================
+# MEMOIRE JVM
+# ======================================
+
+export HBASE_HEAPSIZE={{ hbase_config_heap_mb }}
+
+# ======================================
+# JOURNAUX ET PID
+# ======================================
+
+export HBASE_LOG_DIR="{{ hbase_config_log_dir }}"
+
+export HBASE_PID_DIR="{{ hbase_config_pid_dir }}"

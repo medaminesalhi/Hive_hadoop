@@ -1,0 +1,69 @@
+---
+# ======================================
+# HBASE - REPERTOIRES
+# ======================================
+
+hbase_config_home: "/opt/hbase"
+hbase_config_dir: "{{ hbase_config_home }}/conf"
+
+hbase_config_user: "vagrant"
+hbase_config_group: "vagrant"
+
+# ======================================
+# JAVA ET HADOOP
+# ======================================
+
+hbase_config_java_home: "/usr/lib/jvm/java-11-openjdk-amd64"
+
+hbase_config_hadoop_home: "/opt/hadoop"
+hbase_config_hadoop_conf_dir: "/opt/hadoop/etc/hadoop"
+
+# ======================================
+# HDFS EXISTANT
+# ======================================
+
+hbase_config_rootdir: "hdfs://master:9000/hbase"
+
+# ======================================
+# HBASE DISTRIBUE
+# ======================================
+
+hbase_config_distributed: true
+
+# HMaster que nous demarrerons en premier
+hbase_config_primary_master: "master"
+
+# ======================================
+# ZOOKEEPER
+# ======================================
+
+hbase_config_zk_quorum: "master,worker1,worker2"
+hbase_config_zk_port: 2181
+hbase_config_znode_parent: "/hbase"
+
+hbase_config_manages_zk: false
+
+# ======================================
+# PORTS HBASE
+# ======================================
+
+hbase_config_master_port: 16000
+hbase_config_master_info_port: 16010
+
+hbase_config_rs_port: 16020
+hbase_config_rs_info_port: 16030
+
+# ======================================
+# MEMOIRE
+# ======================================
+
+hbase_config_heap_mb: 512
+
+# ======================================
+# REPERTOIRES LOCAUX
+# ======================================
+
+hbase_config_state_dir: "/var/lib/hbase"
+hbase_config_tmp_dir: "/var/lib/hbase/tmp"
+hbase_config_pid_dir: "/var/lib/hbase/pids"
+hbase_config_log_dir: "/var/log/hbase"

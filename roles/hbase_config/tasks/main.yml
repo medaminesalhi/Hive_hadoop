@@ -1,0 +1,147 @@
+---
+# ==========================================
+# 1. VERIFICATIONS PREALABLES
+# ==========================================
+
+- name: Verifier les groupes HBase
+  ansible.builtin.assert:
+    that:
+      - "'hbase_masters' in groups"
+      - "'hbase_regionservers' in groups"
+      - "groups['hbase_masters'] | length >= 2"
+      - "groups['hbase_regionservers'] | length >= 2"
+      - "hbase_config_primary_master in groups['hbase_masters']"
+    fail_msg: "Inventaire HBase HA incomplet."
+
+- name: Verifier l'installation HBase
+  ansible.builtin.stat:
+    path: "{{ hbase_config_home }}/bin/hbase"
+  register: hbase_binary
+
+- name: Verifier le repertoire de configuration HBase
+  ansible.builtin.stat:
+    path: "{{ hbase_config_dir }}"
+  register: hbase_conf_directory
+
+- name: Verifier la configuration Hadoop
+  ansible.builtin.stat:
+    path: "{{ hbase_config_hadoop_conf_dir }}/core-site.xml"
+  register: hadoop_core_site
+
+- name: Valider les prerequis
+  ansible.builtin.assert:
+    that:
+      - hbase_binary.stat.exists
+      - hbase_conf_directory.stat.isdir | default(false)
+      - hadoop_core_site.stat.exists
+    fail_msg: >-
+      HBase ou la configuration Hadoop est absent
+      sur {{ inventory_hostname }}.
+
+# ==========================================
+# 2. REPERTOIRES LOCAUX
+# ==========================================
+
+- name: Creer les repertoires HBase
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ hbase_config_user }}"
+    group: "{{ hbase_config_group }}"
+    mode: "0755"
+  loop:
+    - "{{ hbase_config_state_dir }}"
+    - "{{ hbase_config_tmp_dir }}"
+    - "{{ hbase_config_pid_dir }}"
+    - "{{ hbase_config_log_dir }}"
+
+# ==========================================
+# 3. CONFIGURATION HBASE
+# ==========================================
+
+- name: Deployer hbase-site.xml
+  ansible.builtin.template:
+    src: hbase-site.xml.j2
+    dest: "{{ hbase_config_dir }}/hbase-site.xml"
+    owner: "{{ hbase_config_user }}"
+    group: "{{ hbase_config_group }}"
+    mode: "0644"
+    backup: true
+
+# ==========================================
+# 4. CONFIGURATION ENVIRONNEMENT
+# ==========================================
+
+- name: Deployer hbase-env.sh
+  ansible.builtin.template:
+    src: hbase-env.sh.j2
+    dest: "{{ hbase_config_dir }}/hbase-env.sh"
+    owner: "{{ hbase_config_user }}"
+    group: "{{ hbase_config_group }}"
+    mode: "0644"
+    backup: true
+
+# ==========================================
+# 5. REGIONSERVERS
+# ==========================================
+
+- name: Deployer la liste des RegionServers
+  ansible.builtin.template:
+    src: regionservers.j2
+    dest: "{{ hbase_config_dir }}/regionservers"
+    owner: "{{ hbase_config_user }}"
+    group: "{{ hbase_config_group }}"
+    mode: "0644"
+
+# ==========================================
+# 6. HMASTERS DE SECOURS
+# ==========================================
+
+- name: Deployer les backup masters
+  ansible.builtin.template:
+    src: backup-masters.j2
+    dest: "{{ hbase_config_dir }}/backup-masters"
+    owner: "{{ hbase_config_user }}"
+    group: "{{ hbase_config_group }}"
+    mode: "0644"
+
+# ==========================================
+# 7. VALIDATION XML
+# ==========================================
+
+- name: Verifier la syntaxe XML
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import sys;
+        import xml.etree.ElementTree as ET;
+        ET.parse(sys.argv[1]);
+        print("XML valide")
+      - "{{ hbase_config_dir }}/hbase-site.xml"
+  changed_when: false
+
+# ==========================================
+# 8. VALIDATION BASH
+# ==========================================
+
+- name: Verifier la syntaxe de hbase-env.sh
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -n
+      - "{{ hbase_config_dir }}/hbase-env.sh"
+  changed_when: false
+
+# ==========================================
+# 9. CONFIRMATION
+# ==========================================
+
+- name: Confirmer la configuration HBase
+  ansible.builtin.debug:
+    msg: >-
+      Configuration HBase HA terminee sur
+      {{ inventory_hostname }}.
+      HDFS={{ hbase_config_rootdir }}.
+      ZooKeeper={{ hbase_config_zk_quorum }}.

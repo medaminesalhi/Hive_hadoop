@@ -1,0 +1,3 @@
+{% for host in groups['hbase_masters'] | difference([hbase_config_primary_master]) | sort %}
+{{ host }}
+{% endfor %}

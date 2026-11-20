@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<configuration>
+
+    <!-- HBase distribue -->
+
+    <property>
+        <name>hbase.cluster.distributed</name>
+        <value>{{ hbase_config_distributed | string | lower }}</value>
+    </property>
+
+    <!-- Stockage HDFS -->
+
+    <property>
+        <name>hbase.rootdir</name>
+        <value>{{ hbase_config_rootdir }}</value>
+    </property>
+
+    <!-- ZooKeeper externe -->
+
+    <property>
+        <name>hbase.zookeeper.quorum</name>
+        <value>{{ hbase_config_zk_quorum }}</value>
+    </property>
+
+    <property>
+        <name>hbase.zookeeper.property.clientPort</name>
+        <value>{{ hbase_config_zk_port }}</value>
+    </property>
+
+    <property>
+        <name>zookeeper.znode.parent</name>
+        <value>{{ hbase_config_znode_parent }}</value>
+    </property>
+
+    <!-- HMaster -->
+
+    <property>
+        <name>hbase.master.port</name>
+        <value>{{ hbase_config_master_port }}</value>
+    </property>
+
+    <property>
+        <name>hbase.master.info.port</name>
+        <value>{{ hbase_config_master_info_port }}</value>
+    </property>
+
+    <!-- RegionServer -->
+
+    <property>
+        <name>hbase.regionserver.port</name>
+        <value>{{ hbase_config_rs_port }}</value>
+    </property>
+
+    <property>
+        <name>hbase.regionserver.info.port</name>
+        <value>{{ hbase_config_rs_info_port }}</value>
+    </property>
+
+    <!-- Repertoire temporaire -->
+
+    <property>
+        <name>hbase.tmp.dir</name>
+        <value>{{ hbase_config_tmp_dir }}</value>
+    </property>
+
+</configuration>

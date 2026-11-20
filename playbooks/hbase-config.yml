@@ -1,0 +1,9 @@
+---
+- name: Configuration du cluster HBase HA
+  hosts: hbase_cluster
+
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: hbase_config
